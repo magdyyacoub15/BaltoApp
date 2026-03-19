@@ -1,0 +1,10 @@
+Analyzing doc...                                                
+
+   info - Statements in an if should be enclosed in a block - lib\features\admin\presentation\admin_management_screen.dart:21:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\features\admin\presentation\admin_management_screen.dart:125:17 - curly_braces_in_flow_control_structures
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\auth\presentation\join_clinic_screen.dart:86:39 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\auth\presentation\login_screen.dart:90:37 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\features\auth\presentation\signup_screen.dart:86:39 - deprecated_member_use
+   info - Unnecessary 'const' keyword - lib\features\dashboard\presentation\dashboard_layout.dart:12:23 - unnecessary_const
+   info - Unnecessary 'const' keyword - lib\features\dashboard\presentation\dashboard_layout.dart:13:24 - unnecessary_const
+

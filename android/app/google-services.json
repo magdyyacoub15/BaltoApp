@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "319887929462",
+    "project_id": "balto-71bdd",
+    "storage_bucket": "balto-71bdd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:319887929462:android:a07b3c0c56385fc1ae2f57",
+        "android_client_info": {
+          "package_name": "com.example.doc"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtMpwVh1EjdGQeIiLf_q3BBFmKZgRH2IQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
