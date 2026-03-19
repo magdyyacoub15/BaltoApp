@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../domain/models/medical_record.dart';
 import '../domain/models/prescription.dart';
 import '../domain/patients_provider.dart';
@@ -15,6 +13,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../../core/localization/language_provider.dart';
 import '../data/prescription_service.dart';
 import '../domain/patient.dart';
+import '../../../core/services/imgbb_service.dart';
 
 class AddMedicalRecordScreen extends ConsumerStatefulWidget {
   final String patientId;
@@ -168,6 +167,7 @@ class _AddMedicalRecordScreenState
     if (_visitImages.isEmpty) return [];
 
     final List<String> uploadedUrls = [];
+    final imgbbService = ref.read(imgbbServiceProvider);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -181,24 +181,11 @@ class _AddMedicalRecordScreenState
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
-        final uri = Uri.parse(
-          'https://api.cloudinary.com/v1_1/dxd8p5xzr/image/upload',
-        );
-        final request = http.MultipartRequest('POST', uri);
-        request.fields['upload_preset'] = 'Baltoo';
-        request.fields['folder'] = 'clinics/$clinicId/prescriptions';
-        request.files.add(
-          await http.MultipartFile.fromPath('file', _visitImages[i].path),
-        );
-
-        final response = await request.send();
-        final responseData = await response.stream.bytesToString();
-
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          final jsonMap = json.decode(responseData);
-          uploadedUrls.add(jsonMap['secure_url'] as String);
+        final url = await imgbbService.uploadImage(_visitImages[i]);
+        if (url != null) {
+          uploadedUrls.add(url);
         } else {
-          debugPrint('Cloudinary Error index $i: ${response.statusCode}');
+          debugPrint('ImgBB Error index $i: Upload failed');
         }
       } catch (e) {
         debugPrint('Error uploading image $i: $e');
@@ -322,7 +309,7 @@ class _AddMedicalRecordScreenState
         paidAmount: paid,
         remainingAmount: remaining,
         attachmentUrls: currentAttachments,
-        isFinalized: false, // DEFERRED VISIBILITY
+        isFinalized: true, // Mark as finalized upon saving
         vitalSigns: VitalSigns(
           bloodPressure: _bpController.text.trim(),
           weight: double.tryParse(_weightController.text) ?? 0.0,

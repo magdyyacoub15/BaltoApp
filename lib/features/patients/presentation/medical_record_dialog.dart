@@ -1,6 +1,4 @@
 import 'dart:io';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../../../core/services/cleanup_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +13,7 @@ import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/localization/language_provider.dart';
 import '../domain/models/prescription.dart';
 import '../data/prescription_service.dart';
+import '../../../core/services/imgbb_service.dart';
 
 class MedicalRecordDialog extends ConsumerStatefulWidget {
   final Patient patient;
@@ -155,6 +154,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
     if (_visitImages.isEmpty) return [];
 
     final List<String> uploadedUrls = [];
+    final imgbbService = ref.read(imgbbServiceProvider);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -166,22 +166,9 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
-        final uri = Uri.parse(
-          'https://api.cloudinary.com/v1_1/dxd8p5xzr/image/upload',
-        );
-        final request = http.MultipartRequest('POST', uri);
-        request.fields['upload_preset'] = 'Baltoo';
-        request.fields['folder'] = 'clinics/$clinicId/prescriptions';
-        request.files.add(
-          await http.MultipartFile.fromPath('file', _visitImages[i].path),
-        );
-
-        final response = await request.send();
-        final responseData = await response.stream.bytesToString();
-
-        if (response.statusCode == 200 || response.statusCode == 201) {
-          final jsonMap = json.decode(responseData);
-          uploadedUrls.add(jsonMap['secure_url'] as String);
+        final url = await imgbbService.uploadImage(_visitImages[i]);
+        if (url != null) {
+          uploadedUrls.add(url);
         }
       } catch (e) {
         debugPrint('Error uploading image $i: $e');
@@ -263,6 +250,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
         paidAmount: paid,
         remainingAmount: remaining,
         attachmentUrls: finalUrls,
+        isFinalized: true, // Mark as finalized upon saving
         vitalSigns: VitalSigns(
           bloodPressure: _bpController.text.trim(),
           weight: double.tryParse(_weightController.text) ?? 0.0,

@@ -11,6 +11,7 @@ import '../data/prescription_service.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/localization/language_provider.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
+import '../../../core/services/imgbb_service.dart';
 
 class VisitDetailsScreen extends ConsumerStatefulWidget {
   final Patient patient;
@@ -35,6 +36,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   late final TextEditingController _sugarController;
 
   List<String> _attachmentUrls = [];
+  final List<File> _visitImages = [];
   List<Medication> _medications = [];
   bool _isLoading = false;
 
@@ -78,14 +80,36 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
+    final pickedFile = await picker.pickImage(
+      source: source,
+      imageQuality: 50,
+      maxWidth: 1080,
+      maxHeight: 1080,
+    );
     if (pickedFile != null) {
-      // In a real app, upload to storage first. For now, we'll simulate local path.
-      // But we need a proper upload logic. The existing app uses a storage service.
       setState(() {
-        _attachmentUrls.add(pickedFile.path);
+        _visitImages.add(File(pickedFile.path));
       });
     }
+  }
+
+  Future<List<String>> _uploadImages() async {
+    if (_visitImages.isEmpty) return [];
+
+    final List<String> uploadedUrls = [];
+    final imgbbService = ref.read(imgbbServiceProvider);
+
+    for (var i = 0; i < _visitImages.length; i++) {
+      try {
+        final url = await imgbbService.uploadImage(_visitImages[i]);
+        if (url != null) {
+          uploadedUrls.add(url);
+        }
+      } catch (e) {
+        debugPrint('Error uploading image $i: $e');
+      }
+    }
+    return uploadedUrls;
   }
 
   Future<void> _save() async {
@@ -93,10 +117,15 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     try {
       final repo = ref.read(patientRepositoryProvider);
 
+      // Upload new images first
+      final newUrls = await _uploadImages();
+      final finalUrls = [..._attachmentUrls, ...newUrls];
+
       final updatedRecord = widget.record.copyWith(
         diagnosis: _diagnosisController.text.trim(),
         doctorNotes: _notesController.text.trim(),
-        attachmentUrls: _attachmentUrls,
+        attachmentUrls: finalUrls,
+        isFinalized: true, // Mark as past visit upon saving
         vitalSigns: VitalSigns(
           bloodPressure: _bpController.text.trim(),
           weight: double.tryParse(_weightController.text) ?? 0.0,
@@ -118,6 +147,8 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(ref.tr('save_success'))));
+        // Optional: Navigate back or refresh state
+        Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
@@ -149,7 +180,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Header matching AddPatientScreen
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 24,
@@ -183,7 +213,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   ],
                 ),
               ),
-              // Body
               Flexible(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(24),
@@ -316,7 +345,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             prefixIcon: Icon(icon, color: Colors.blue.shade700, size: 20),
             filled: true,
             fillColor: Colors.blue.shade50.withAlpha(30),
-            hintText: '', // Ensuring the field is completely empty as requested
+            hintText: '',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: BorderSide(color: Colors.blue.shade100, width: 1),
@@ -346,7 +375,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     final clinic = ref.read(clinicStreamProvider).value;
     if (clinic == null) return;
 
-    // Create a temporary record for printing
     final printRecord = widget.record.copyWith(
       diagnosis: _diagnosisController.text.trim(),
       doctorNotes: _notesController.text.trim(),
@@ -369,7 +397,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Find follow-ups for this record
     final followUps =
         widget.patient.records
             .where((r) => r.parentRecordId == widget.record.id)
@@ -399,15 +426,10 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Patient Info Header
                 _buildPatientHeader(),
                 const SizedBox(height: 20),
-
-                // Main Record Card
                 _buildMainRecordCard(),
                 const SizedBox(height: 20),
-
-                // Follow-ups Section
                 if (followUps.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(
@@ -429,8 +451,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   }).toList(),
                   const SizedBox(height: 20),
                 ],
-
-                // Action Buttons - Only Save
                 ElevatedButton.icon(
                   onPressed: _isLoading ? null : _save,
                   icon: _isLoading
@@ -527,7 +547,9 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
               ),
               const SizedBox(width: 8),
               Text(
-                ref.tr('current_visit'),
+                widget.record.isFinalized
+                    ? ref.tr('visit_details')
+                    : ref.tr('current_visit'),
                 style: TextStyle(
                   color: Colors.blue.shade900,
                   fontWeight: FontWeight.bold,
@@ -541,7 +563,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             ],
           ),
           const Divider(height: 24),
-
           _buildInputSection(
             label: ref.tr('diagnosis'),
             controller: _diagnosisController,
@@ -549,7 +570,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             maxLines: 2,
           ),
           const SizedBox(height: 16),
-
           _buildInputSection(
             label: ref.tr('doctor_notes'),
             controller: _notesController,
@@ -557,16 +577,10 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             maxLines: 4,
           ),
           const SizedBox(height: 20),
-
-          // Vitals Grid
           _buildVitalsGrid(),
           const SizedBox(height: 20),
-
-          // Prescription Section
           _buildPrescriptionSection(),
           const SizedBox(height: 20),
-
-          // Attachments
           _buildAttachmentsSection(),
         ],
       ),
@@ -584,23 +598,31 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
               ref.tr('prescription'),
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
-            Row(
-              children: [
-                TextButton.icon(
-                  onPressed: _showPrescriptionDialog,
-                  icon: const Icon(Icons.edit_note, size: 18),
-                  label: Text(ref.tr('write_prescription')),
+            Flexible(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _showPrescriptionDialog,
+                      icon: const Icon(Icons.edit_note, size: 18),
+                      label: Text(ref.tr('write_prescription')),
+                    ),
+                    if (_medications.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: _printPrescription,
+                        icon: const Icon(Icons.print, size: 18),
+                        label: Text(ref.tr('print')),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.green,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                if (_medications.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  TextButton.icon(
-                    onPressed: _printPrescription,
-                    icon: const Icon(Icons.print, size: 18),
-                    label: Text(ref.tr('print')),
-                    style: TextButton.styleFrom(foregroundColor: Colors.green),
-                  ),
-                ],
-              ],
+              ),
             ),
           ],
         ),
@@ -756,7 +778,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             ),
           ],
         ),
-        if (_attachmentUrls.isEmpty)
+        if (_attachmentUrls.isEmpty && _visitImages.isEmpty)
           Container(
             height: 60,
             alignment: Alignment.center,
@@ -778,37 +800,76 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             height: 100,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              itemCount: _attachmentUrls.length,
+              itemCount: _attachmentUrls.length + _visitImages.length,
               itemBuilder: (context, index) {
-                final url = _attachmentUrls[index];
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: _buildImage(url),
-                      ),
-                      Positioned(
-                        top: 2,
-                        right: 2,
-                        child: GestureDetector(
-                          onTap: () =>
-                              setState(() => _attachmentUrls.removeAt(index)),
-                          child: CircleAvatar(
-                            radius: 10,
-                            backgroundColor: Colors.red.withAlpha(200),
-                            child: const Icon(
-                              Icons.close,
-                              size: 12,
-                              color: Colors.white,
+                if (index < _attachmentUrls.length) {
+                  final url = _attachmentUrls[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: _buildImage(url),
+                        ),
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: GestureDetector(
+                            onTap: () =>
+                                setState(() => _attachmentUrls.removeAt(index)),
+                            child: CircleAvatar(
+                              radius: 10,
+                              backgroundColor: Colors.red.withAlpha(200),
+                              child: const Icon(
+                                Icons.close,
+                                size: 12,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                );
+                      ],
+                    ),
+                  );
+                } else {
+                  final imageIndex = index - _attachmentUrls.length;
+                  final file = _visitImages[imageIndex];
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.file(
+                            file,
+                            width: 90,
+                            height: 90,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          top: 2,
+                          right: 2,
+                          child: GestureDetector(
+                            onTap: () => setState(
+                              () => _visitImages.removeAt(imageIndex),
+                            ),
+                            child: CircleAvatar(
+                              radius: 10,
+                              backgroundColor: Colors.red.withAlpha(200),
+                              child: const Icon(
+                                Icons.close,
+                                size: 12,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
               },
             ),
           ),

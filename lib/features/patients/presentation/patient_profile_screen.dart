@@ -10,6 +10,7 @@ import './medical_record_dialog.dart';
 import '../domain/patients_provider.dart';
 import '../data/patient_repository.dart';
 import 'visit_details_screen.dart';
+import 'add_medical_record_screen.dart';
 import '../data/prescription_service.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
@@ -215,8 +216,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      if (livePatient.records.isNotEmpty)
-                        _buildCurrentVisitCard(context, livePatient),
+                      _buildCurrentVisitCard(context, livePatient),
                     ],
                   ),
                 ),
@@ -1078,14 +1078,46 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
   }
 
   Widget _buildCurrentVisitCard(BuildContext context, Patient patient) {
-    // Show the latest non-finalized or latest main record
-    final latestRecord =
+    final latestRecords =
         patient.records.where((r) => r.parentRecordId == null).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
 
-    if (latestRecord.isEmpty) return const SizedBox.shrink();
+    // If no records or latest record is finalized, show "Add Visit" button
+    if (latestRecords.isEmpty || latestRecords.first.isFinalized) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: ElevatedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      AddMedicalRecordScreen(patientId: patient.id),
+                ),
+              );
+            },
+            icon: const Icon(Icons.add_circle_outline),
+            label: Text(
+              ref.tr('add_visit'),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white.withAlpha(40),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              side: BorderSide(color: Colors.white.withAlpha(60)),
+            ),
+          ),
+        ),
+      );
+    }
 
-    final record = latestRecord.first;
+    final record = latestRecords.first;
 
     return InkWell(
       onTap: () {
