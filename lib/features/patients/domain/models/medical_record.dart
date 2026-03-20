@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'prescription.dart';
 
 class VitalSigns {
@@ -64,7 +63,9 @@ class MedicalRecord {
   factory MedicalRecord.fromMap(Map<String, dynamic> map) {
     return MedicalRecord(
       id: map['id'] ?? '',
-      date: (map['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      date: map['date'] != null
+          ? DateTime.tryParse(map['date'].toString()) ?? DateTime.now()
+          : DateTime.now(),
       diagnosis: map['diagnosis'] ?? '',
       doctorNotes: map['doctorNotes'] ?? '',
       vitalSigns: map['vitalSigns'] != null
@@ -86,7 +87,7 @@ class MedicalRecord {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'date': Timestamp.fromDate(date),
+      'date': date.toIso8601String(),
       'diagnosis': diagnosis,
       'doctorNotes': doctorNotes,
       'vitalSigns': vitalSigns?.toMap(),

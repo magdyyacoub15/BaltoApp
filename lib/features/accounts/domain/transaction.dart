@@ -1,5 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 enum TransactionType { revenue, expense }
 
 class AppTransaction {
@@ -24,7 +22,7 @@ class AppTransaction {
       'amount': amount,
       'description': description,
       'type': type.name,
-      'date': Timestamp.fromDate(date),
+      'date': date.toIso8601String(),
       'clinicId': clinicId,
     };
   }
@@ -35,7 +33,9 @@ class AppTransaction {
       amount: (map['amount'] as num).toDouble(),
       description: map['description'] ?? '',
       type: TransactionType.values.byName(map['type']),
-      date: (map['date'] as Timestamp).toDate(),
+      date: map['date'] != null
+          ? DateTime.tryParse(map['date'].toString()) ?? DateTime.now()
+          : DateTime.now(),
       clinicId: map['clinicId'] ?? '',
     );
   }

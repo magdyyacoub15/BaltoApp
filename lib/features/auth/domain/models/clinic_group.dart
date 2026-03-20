@@ -32,13 +32,13 @@ class ClinicGroup {
       name: data['name'] ?? '',
       clinicCode: data['clinicCode'] ?? '',
       createdAt: data['createdAt'] != null
-          ? (data['createdAt'] as dynamic).toDate()
+          ? DateTime.tryParse(data['createdAt'].toString()) ?? DateTime.now()
           : DateTime.now(),
       lastShiftReset: data['lastShiftReset'] != null
-          ? (data['lastShiftReset'] as dynamic).toDate()
+          ? DateTime.tryParse(data['lastShiftReset'].toString())
           : null,
       subscriptionEndDate: data['subscriptionEndDate'] != null
-          ? (data['subscriptionEndDate'] as dynamic).toDate()
+          ? DateTime.tryParse(data['subscriptionEndDate'].toString())
           : null,
       isTrial: data['isTrial'] ?? false,
       address: data['address'],
@@ -52,9 +52,9 @@ class ClinicGroup {
     return {
       'name': name,
       'clinicCode': clinicCode,
-      'createdAt': createdAt,
-      'lastShiftReset': lastShiftReset,
-      'subscriptionEndDate': subscriptionEndDate,
+      'createdAt': createdAt.toIso8601String(),
+      'lastShiftReset': lastShiftReset?.toIso8601String(),
+      'subscriptionEndDate': subscriptionEndDate?.toIso8601String(),
       'isTrial': isTrial,
       'address': address,
       'phone': phone,

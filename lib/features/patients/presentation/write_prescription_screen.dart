@@ -10,6 +10,7 @@ import '../data/prescription_service.dart';
 import '../domain/patient.dart';
 import '../../../core/localization/language_provider.dart';
 import 'package:intl/intl.dart';
+import 'prescription_preview_screen.dart';
 
 class WritePrescriptionScreen extends ConsumerStatefulWidget {
   final String patientId;
@@ -101,12 +102,24 @@ class _WritePrescriptionScreenState
       medications: _medications,
     );
 
-    await PrescriptionService.printPrescription(
+    final pdfBytes = await PrescriptionService.generatePrescriptionPdf(
       clinic: clinic,
       patient: patient,
       record: tempRecord,
       languageCode: ref.read(languageProvider).languageCode,
     );
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PrescriptionPreviewScreen(
+            pdfBytes: pdfBytes,
+            title: '${ref.tr('prescription')} - ${patient.name}',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _savePrescription() async {

@@ -1,70 +1,143 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+// ignore_for_file: deprecated_member_use
+import 'package:appwrite/appwrite.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/cleanup_service.dart';
+import '../../../core/services/hive_cache_service.dart';
+import '../../../core/services/connectivity_service.dart';
 import '../domain/patient.dart';
 import '../domain/models/medical_record.dart';
+import '../../../core/services/appwrite_client.dart';
 
 final patientRepositoryProvider = Provider((ref) {
-  return PatientRepository(ref.read(cleanupServiceProvider));
+  return PatientRepository(
+    ref.read(cleanupServiceProvider),
+    ref.read(appwriteDatabasesProvider),
+    ref.read(hiveCacheServiceProvider),
+  );
 });
 
 class PatientRepository {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final CleanupService _cleanupService;
+  final Databases _databases;
+  final HiveCacheService _cache;
 
-  PatientRepository(this._cleanupService);
+  PatientRepository(this._cleanupService, this._databases, this._cache);
 
-  // Stream of patients for a specific clinic
-  Stream<List<Patient>> getPatients(String clinicId) {
-    return _firestore
-        .collection('patients')
-        .where('clinicId', isEqualTo: clinicId)
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs
-              .map((doc) => Patient.fromMap(doc.data(), doc.id))
-              .toList();
-        });
+  /// Returns patients immediately from cache (offline-first).
+  /// Fetches fresh data in background and updates cache if online.
+  Future<List<Patient>> getPatients(String clinicId) async {
+    // 1. Serve from cache immediately
+    final cached = _cache.getCachedPatients(clinicId);
+    if (cached != null) {
+      _refreshPatientsInBackground(clinicId); // fire-and-forget
+      return cached.map((m) => Patient.fromMap(m, m['id'] ?? '')).toList();
+    }
+
+    // 2. No cache → must fetch from network
+    return _fetchAndCachePatients(clinicId);
+  }
+
+  /// Only called from UI when user explicitly requests a refresh.
+  Future<List<Patient>> refreshPatients(String clinicId) async {
+    return _fetchAndCachePatients(clinicId);
+  }
+
+  void _refreshPatientsInBackground(String clinicId) {
+    _fetchAndCachePatients(clinicId).catchError((e) {
+      debugPrint('PatientRepository: background refresh error: $e');
+      return <Patient>[];
+    });
+  }
+
+  Future<List<Patient>> _fetchAndCachePatients(String clinicId) async {
+    try {
+      final isOnline = await checkIsOnline();
+      if (!isOnline) {
+        final cached = _cache.getCachedPatients(clinicId);
+        return cached?.map((m) => Patient.fromMap(m, m['id'] ?? '')).toList() ??
+            [];
+      }
+
+      final List<Patient> all = [];
+      int offset = 0;
+      const int batchSize = 100;
+
+      while (true) {
+        final res = await _databases.listDocuments(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'patients',
+          queries: [
+            Query.equal('clinicId', clinicId),
+            Query.limit(batchSize),
+            Query.offset(offset),
+          ],
+        );
+        final batch = res.documents.map((d) => Patient.fromMap(d.data, d.$id));
+        all.addAll(batch);
+        if (res.documents.length < batchSize) break;
+        offset += batchSize;
+      }
+
+      // Update cache
+      _cache.cachePatients(
+        clinicId,
+        all.map((p) => {...p.toMap(), 'id': p.id}).toList(),
+      );
+      return all;
+    } catch (_) {
+      // Network failed — return stale cache
+      final cached = _cache.getCachedPatients(clinicId);
+      return cached?.map((m) => Patient.fromMap(m, m['id'] ?? '')).toList() ??
+          [];
+    }
   }
 
   Future<String> addPatient(Patient patient) async {
-    final docRef = await _firestore.collection('patients').add(patient.toMap());
-    return docRef.id;
+    final docRef = await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'patients',
+      documentId: ID.unique(),
+      data: patient.toMap(),
+    );
+    // Invalidate cache so next load fetches fresh
+    await _fetchAndCachePatients(patient.clinicId);
+    return docRef.$id;
   }
 
   Future<void> updatePatient(Patient patient) async {
-    await _firestore
-        .collection('patients')
-        .doc(patient.id)
-        .update(patient.toMap());
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'patients',
+      documentId: patient.id,
+      data: patient.toMap(),
+    );
+    // Update cache in background
+    _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
   }
 
   Future<void> deletePatient(Patient patient) async {
-    // 1. Delete all attachments in all medical records
     for (var record in patient.records) {
       for (var url in record.attachmentUrls) {
         await _cleanupService.deleteCloudFile(url);
       }
     }
-
-    // 2. Delete prescription image if exists
     if (patient.prescriptionImageUrl != null) {
       await _cleanupService.deleteCloudFile(patient.prescriptionImageUrl);
     }
-
-    // 3. Delete from Firestore
-    await _firestore.collection('patients').doc(patient.id).delete();
+    await _databases.deleteDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'patients',
+      documentId: patient.id,
+    );
+    _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
   }
 
   Future<void> deleteMedicalRecord(Patient patient, String recordId) async {
     final record = patient.records.firstWhere((r) => r.id == recordId);
-
-    // 1. Delete attachments for this specific record
     for (var url in record.attachmentUrls) {
       await _cleanupService.deleteCloudFile(url);
     }
-
-    // 2. Update patient document to remove this record
     final updatedRecords = patient.records
         .where((r) => r.id != recordId)
         .toList();
@@ -74,65 +147,68 @@ class PatientRepository {
   Future<void> addMedicalRecord(String patientId, MedicalRecord record) async {
     final patient = await getPatientById(patientId);
     if (patient == null) return;
-
     final updatedRecords = [...patient.records, record];
     await updatePatient(patient.copyWith(records: updatedRecords));
   }
 
   Future<Patient?> getPatientByName(String name, String clinicId) async {
-    final snapshot = await _firestore
-        .collection('patients')
-        .where('clinicId', isEqualTo: clinicId)
-        .where('name', isEqualTo: name)
-        .limit(1)
-        .get();
+    // Try cache first
+    final cached = _cache.getCachedPatients(clinicId);
+    if (cached != null) {
+      final found = cached.cast<Map<String, dynamic>>().firstWhere(
+        (m) => (m['name'] ?? '').toString().toLowerCase() == name.toLowerCase(),
+        orElse: () => {},
+      );
+      if (found.isNotEmpty) return Patient.fromMap(found, found['id'] ?? '');
+    }
 
-    if (snapshot.docs.isEmpty) return null;
-    return Patient.fromMap(snapshot.docs.first.data(), snapshot.docs.first.id);
+    // Fallback to network
+    try {
+      final snapshot = await _databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'patients',
+        queries: [
+          Query.equal('clinicId', clinicId),
+          Query.equal('name', name),
+          Query.limit(1),
+        ],
+      );
+      if (snapshot.documents.isEmpty) return null;
+      return Patient.fromMap(
+        snapshot.documents.first.data,
+        snapshot.documents.first.$id,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Patient?> getPatientById(String id) async {
-    final doc = await _firestore.collection('patients').doc(id).get();
-    if (!doc.exists) return null;
-    return Patient.fromMap(doc.data()!, doc.id);
+    try {
+      final doc = await _databases.getDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'patients',
+        documentId: id,
+      );
+      return Patient.fromMap(doc.data, doc.$id);
+    } catch (_) {
+      return null;
+    }
   }
 
-  Future<void> finalizeAllPendingRecords(
-    String clinicId, {
-    String? excludePatientId,
-  }) async {
-    final snapshot = await _firestore
-        .collection('patients')
-        .where('clinicId', isEqualTo: clinicId)
-        .get();
-
-    final batch = _firestore.batch();
-    bool hasUpdates = false;
-
-    for (final doc in snapshot.docs) {
-      if (excludePatientId != null && doc.id == excludePatientId) continue;
-
-      final data = doc.data();
-      final recordsList = data['records'] as List?;
-      if (recordsList == null) continue;
-
-      bool patientUpdated = false;
-      final updatedRecords = recordsList.map((r) {
-        if (r['isFinalized'] == false) {
-          patientUpdated = true;
-          return {...r, 'isFinalized': true};
-        }
-        return r;
-      }).toList();
-
-      if (patientUpdated) {
-        batch.update(doc.reference, {'records': updatedRecords});
-        hasUpdates = true;
+  Future<void> finalizeAllPendingRecords(List<Patient> patients) async {
+    final futures = <Future>[];
+    for (final patient in patients) {
+      if (patient.records.any((r) => !r.isFinalized)) {
+        final patientCopy = patient.copyWith(
+          records: patient.records
+              .map((r) => r.isFinalized ? r : r.copyWith(isFinalized: true))
+              .toList(),
+        );
+        futures.add(updatePatient(patientCopy));
+        if (futures.length >= 490) break;
       }
     }
-
-    if (hasUpdates) {
-      await batch.commit();
-    }
+    if (futures.isNotEmpty) await Future.wait(futures);
   }
 }

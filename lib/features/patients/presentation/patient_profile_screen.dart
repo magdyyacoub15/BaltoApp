@@ -10,7 +10,6 @@ import './medical_record_dialog.dart';
 import '../domain/patients_provider.dart';
 import '../data/patient_repository.dart';
 import 'visit_details_screen.dart';
-import 'add_medical_record_screen.dart';
 import '../data/prescription_service.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
@@ -19,6 +18,7 @@ import '../../../core/services/permission_service.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/presentation/widgets/full_screen_image_viewer.dart';
 import '../../../core/localization/language_provider.dart';
+import 'prescription_preview_screen.dart';
 
 class PatientProfileScreen extends ConsumerStatefulWidget {
   final Patient patient;
@@ -290,12 +290,24 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
     final clinic = ref.read(clinicStreamProvider).value;
     if (clinic == null) return;
 
-    await PrescriptionService.printPrescription(
+    final pdfBytes = await PrescriptionService.generatePrescriptionPdf(
       clinic: clinic,
       patient: patient,
       record: record,
       languageCode: ref.read(languageProvider).languageCode,
     );
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PrescriptionPreviewScreen(
+            pdfBytes: pdfBytes,
+            title: '${ref.tr('prescription')} - ${patient.name}',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _showDeleteRecordDialog(
@@ -1082,39 +1094,9 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
         patient.records.where((r) => r.parentRecordId == null).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
 
-    // If no records or latest record is finalized, show "Add Visit" button
+    // If no records or latest record is finalized, hiding the add visit button as requested
     if (latestRecords.isEmpty || latestRecords.first.isFinalized) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: SizedBox(
-          width: double.infinity,
-          height: 56,
-          child: ElevatedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                      AddMedicalRecordScreen(patientId: patient.id),
-                ),
-              );
-            },
-            icon: const Icon(Icons.add_circle_outline),
-            label: Text(
-              ref.tr('add_visit'),
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white.withAlpha(40),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              side: BorderSide(color: Colors.white.withAlpha(60)),
-            ),
-          ),
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     final record = latestRecords.first;

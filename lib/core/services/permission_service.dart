@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'subscription_service.dart';
 
-final subscriptionServiceProvider = Provider((ref) => SubscriptionService());
-
 final permissionServiceProvider = Provider((ref) {
   final subscriptionService = ref.watch(subscriptionServiceProvider);
   return PermissionService(subscriptionService);

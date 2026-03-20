@@ -11,8 +11,12 @@ import '../../accounts/domain/transaction.dart';
 import '../../accounts/data/transaction_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/localization/language_provider.dart';
+import 'prescription_preview_screen.dart';
 import '../data/prescription_service.dart';
 import '../domain/patient.dart';
+import '../domain/clinic_medications_provider.dart';
+import '../../appointments/data/appointment_repository.dart';
+import '../../appointments/domain/appointments_provider.dart';
 import '../../../core/services/imgbb_service.dart';
 
 class AddMedicalRecordScreen extends ConsumerStatefulWidget {
@@ -49,9 +53,7 @@ class _AddMedicalRecordScreenState
   // Medications
   final _medications = <Medication>[];
   final _medNameController = TextEditingController();
-  final _dosageController = TextEditingController();
-  final _freqController = TextEditingController();
-  final _durationController = TextEditingController();
+  final _medNameFocusNode = FocusNode();
   final _medNotesController = TextEditingController();
 
   final List<File> _visitImages = [];
@@ -100,32 +102,26 @@ class _AddMedicalRecordScreenState
     _paidController.dispose();
     _remainingController.dispose();
     _medNameController.dispose();
-    _dosageController.dispose();
-    _freqController.dispose();
-    _durationController.dispose();
+    _medNameFocusNode.dispose();
     _medNotesController.dispose();
 
     super.dispose();
   }
 
   void _addMedication() {
-    if (_medNameController.text.isNotEmpty &&
-        _dosageController.text.isNotEmpty) {
+    if (_medNameController.text.isNotEmpty) {
       setState(() {
         _medications.add(
           Medication(
             name: _medNameController.text.trim(),
-            dosage: _dosageController.text.trim(),
-            frequency: _freqController.text.trim(),
-            duration: _durationController.text.trim(),
+            dosage: '',
+            frequency: '',
+            duration: '',
             instructions: _medNotesController.text.trim(),
           ),
         );
       });
       _medNameController.clear();
-      _dosageController.clear();
-      _freqController.clear();
-      _durationController.clear();
       _medNotesController.clear();
     }
   }
@@ -236,12 +232,24 @@ class _AddMedicalRecordScreenState
       ),
     );
 
-    await PrescriptionService.printPrescription(
+    final pdfBytes = await PrescriptionService.generatePrescriptionPdf(
       clinic: clinic,
       patient: patient,
       record: tempRecord,
       languageCode: ref.read(languageProvider).languageCode,
     );
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PrescriptionPreviewScreen(
+            pdfBytes: pdfBytes,
+            title: '${ref.tr('prescription')} - ${patient.name}',
+          ),
+        ),
+      );
+    }
   }
 
   void _showImageSourcePicker(BuildContext context) {
@@ -365,6 +373,22 @@ class _AddMedicalRecordScreenState
           clinicId: user.clinicId,
         );
         await transactionRepo.addTransaction(revenue);
+      }
+
+      // Find the active appointment and mark it as completed
+      final apptRepo = ref.read(appointmentRepositoryProvider);
+      final appointmentsAsync = ref.read(appointmentsStreamProvider);
+      try {
+        final activeAppt = appointmentsAsync.value?.firstWhere(
+          (a) => a.patientId == patient.id && !a.isCompleted,
+        );
+        if (activeAppt != null) {
+          await apptRepo.updateAppointment(
+            activeAppt.copyWith(isCompleted: true, isWaiting: false),
+          );
+        }
+      } catch (_) {
+        // StateError is thrown by firstWhere if no element is found, we just ignore it
       }
 
       if (mounted) {
@@ -641,72 +665,112 @@ class _AddMedicalRecordScreenState
                   padding: const EdgeInsets.all(12.0),
                   child: Column(
                     children: [
-                      TextFormField(
-                        controller: _medNameController,
-                        decoration: InputDecoration(
-                          label: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(ref.tr('medication_name')),
-                          ),
-                          prefixIcon: const Icon(Icons.medication),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _dosageController,
-                              decoration: InputDecoration(
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(ref.tr('dosage')),
+                      RawAutocomplete<Medication>(
+                        textEditingController: _medNameController,
+                        focusNode: _medNameFocusNode,
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          if (textEditingValue.text.isEmpty) {
+                            return const Iterable<Medication>.empty();
+                          }
+                          final allMeds = ref.read(clinicMedicationsProvider);
+                          return allMeds.where(
+                            (med) => med.name.toLowerCase().contains(
+                              textEditingValue.text.toLowerCase(),
+                            ),
+                          );
+                        },
+                        displayStringForOption: (Medication med) => med.name,
+                        onSelected: (Medication selection) {
+                          if (_medNotesController.text.isEmpty &&
+                              selection.instructions.isNotEmpty) {
+                            _medNotesController.text = selection.instructions;
+                          }
+                        },
+                        fieldViewBuilder:
+                            (
+                              context,
+                              controller,
+                              focusNode,
+                              onEditingComplete,
+                            ) {
+                              return TextFormField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                decoration: InputDecoration(
+                                  hintText: ref.tr('medication_name'),
+                                  prefixIcon: const Icon(
+                                    Icons.medication_outlined,
+                                  ),
+                                ),
+                              );
+                            },
+                        optionsViewBuilder: (context, onSelected, options) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 8.0,
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                width: 300,
+                                constraints: const BoxConstraints(
+                                  maxHeight: 250,
+                                ),
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  shrinkWrap: true,
+                                  itemCount: options.length,
+                                  itemBuilder: (context, index) {
+                                    final option = options.elementAt(index);
+                                    return ListTile(
+                                      title: Text(
+                                        option.name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      subtitle: option.instructions.isNotEmpty
+                                          ? Text(
+                                              option.instructions,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            )
+                                          : null,
+                                      onTap: () {
+                                        onSelected(option);
+                                      },
+                                    );
+                                  },
                                 ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _freqController,
-                              decoration: InputDecoration(
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(ref.tr('frequency')),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _durationController,
-                              decoration: InputDecoration(
-                                label: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(ref.tr('duration')),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: _medNotesController,
                         decoration: InputDecoration(
-                          label: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(ref.tr('additional_instructions')),
-                          ),
-                          prefixIcon: const Icon(Icons.note_alt_outlined),
+                          hintText: ref.tr('additional_instructions'),
+                          prefixIcon: const Icon(Icons.info_outline),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      ElevatedButton.icon(
-                        onPressed: _addMedication,
-                        icon: const Icon(Icons.add),
-                        label: Text(ref.tr('add_to_prescription')),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _addMedication,
+                          icon: const Icon(Icons.add),
+                          label: Text(
+                            ref.tr('add_medication'),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -720,12 +784,56 @@ class _AddMedicalRecordScreenState
                   itemCount: _medications.length,
                   itemBuilder: (context, index) {
                     final med = _medications[index];
-                    return ListTile(
-                      title: Text('${med.name} (${med.dosage})'),
-                      subtitle: Text('${med.frequency} - ${med.duration}'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _removeMedication(index),
+                    return Card(
+                      elevation: 0,
+                      color: Colors.grey.shade50,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: Colors.grey.shade200),
+                      ),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                        leading: CircleAvatar(
+                          backgroundColor: Theme.of(
+                            context,
+                          ).primaryColor.withValues(alpha: 0.1),
+                          child: Icon(
+                            Icons.medication,
+                            color: Theme.of(context).primaryColor,
+                            size: 20,
+                          ),
+                        ),
+                        title: Text(
+                          med.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        subtitle: med.instructions.isNotEmpty
+                            ? Padding(
+                                padding: const EdgeInsets.only(top: 4.0),
+                                child: Text(
+                                  med.instructions,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              )
+                            : null,
+                        trailing: IconButton(
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.redAccent,
+                            size: 22,
+                          ),
+                          onPressed: () => _removeMedication(index),
+                        ),
                       ),
                     );
                   },

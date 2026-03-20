@@ -1,18 +1,27 @@
 import 'package:flutter/foundation.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:appwrite/appwrite.dart';
+// ignore_for_file: deprecated_member_use
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'appwrite_client.dart';
 
 enum SubscriptionStatus { active, trial, expired, offline }
 
+final subscriptionServiceProvider = Provider((ref) {
+  return SubscriptionService(ref.read(appwriteDatabasesProvider));
+});
+
 class SubscriptionService {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final Databases _databases;
 
   // Caching variables
   SubscriptionStatus? _cachedStatus;
   DateTime? _lastCheckTime;
   static const Duration _cacheDuration = Duration(hours: 12);
+
+  SubscriptionService(this._databases);
 
   // Securely fetch network time to prevent local clock manipulation
   Future<DateTime?> _fetchRealTime() async {
@@ -83,18 +92,22 @@ class SubscriptionService {
         return SubscriptionStatus.offline;
       }
 
-      // 3. Fetch from Firestore
-      final doc = await _firestore.collection('clinics').doc(clinicId).get();
-      if (!doc.exists) return SubscriptionStatus.expired;
+      // 3. Fetch from Appwrite
+      final doc = await _databases.getDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'clinics',
+        documentId: clinicId,
+      );
 
-      final data = doc.data()!;
+      final data = doc.data;
       if (!data.containsKey('subscriptionEndDate') ||
           data['subscriptionEndDate'] == null) {
         return SubscriptionStatus.expired;
       }
 
-      final DateTime endDate = (data['subscriptionEndDate'] as Timestamp)
-          .toDate();
+      final DateTime endDate = DateTime.parse(
+        data['subscriptionEndDate'].toString(),
+      ).toLocal();
       SubscriptionStatus status;
 
       if (endDate.isAfter(networkNow)) {
@@ -126,11 +139,21 @@ class SubscriptionService {
       final DateTime? networkNow = await _fetchRealTime();
       if (networkNow == null) return 0;
 
-      final doc = await _firestore.collection('clinics').doc(clinicId).get();
-      if (!doc.exists || doc.data()?['subscriptionEndDate'] == null) return 0;
+      final doc = await _databases.getDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'clinics',
+        documentId: clinicId,
+      );
 
-      final DateTime endDate = (doc.data()!['subscriptionEndDate'] as Timestamp)
-          .toDate();
+      final data = doc.data;
+      if (!data.containsKey('subscriptionEndDate') ||
+          data['subscriptionEndDate'] == null) {
+        return 0;
+      }
+
+      final DateTime endDate = DateTime.parse(
+        data['subscriptionEndDate'].toString(),
+      ).toLocal();
       if (endDate.isBefore(networkNow)) return 0;
 
       return endDate.difference(networkNow).inDays;
@@ -142,52 +165,66 @@ class SubscriptionService {
   // Admin Methods
 
   Future<void> extendSubscription(String clinicId, int days) async {
-    final docRef = _firestore.collection('clinics').doc(clinicId);
+    final doc = await _databases.getDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinicId,
+    );
 
-    await _firestore.runTransaction((transaction) async {
-      final snapshot = await transaction.get(docRef);
-      if (!snapshot.exists) {
-        throw Exception("Clinic not found");
-      }
+    final data = doc.data;
+    DateTime newEndDate;
 
-      final data = snapshot.data()!;
-      DateTime newEndDate;
-
-      if (data.containsKey('subscriptionEndDate') &&
-          data['subscriptionEndDate'] != null) {
-        final currentEndDate = (data['subscriptionEndDate'] as Timestamp)
-            .toDate();
-        // If expired, add from today. If active, extend from current end date.
-        if (currentEndDate.isBefore(DateTime.now())) {
-          newEndDate = DateTime.now().add(Duration(days: days));
-        } else {
-          newEndDate = currentEndDate.add(Duration(days: days));
-        }
-      } else {
-        // No existing date, start from today
+    if (data.containsKey('subscriptionEndDate') &&
+        data['subscriptionEndDate'] != null) {
+      final currentEndDate = DateTime.parse(
+        data['subscriptionEndDate'].toString(),
+      ).toLocal();
+      // If expired, add from today. If active, extend from current end date.
+      if (currentEndDate.isBefore(DateTime.now())) {
         newEndDate = DateTime.now().add(Duration(days: days));
+      } else {
+        newEndDate = currentEndDate.add(Duration(days: days));
       }
+    } else {
+      // No existing date, start from today
+      newEndDate = DateTime.now().add(Duration(days: days));
+    }
 
-      transaction.update(docRef, {
-        'subscriptionEndDate': Timestamp.fromDate(newEndDate),
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinicId,
+      data: {
+        'subscriptionEndDate': newEndDate.toUtc().toIso8601String(),
         'isTrial': false, // Extending clears trial status
-      });
-    });
+      },
+    );
   }
 
   Future<void> updateSubscriptionDate(String clinicId, DateTime newDate) async {
-    await _firestore.collection('clinics').doc(clinicId).update({
-      'subscriptionEndDate': Timestamp.fromDate(newDate),
-      'isTrial': false,
-    });
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinicId,
+      data: {
+        'subscriptionEndDate': newDate.toUtc().toIso8601String(),
+        'isTrial': false,
+      },
+    );
   }
 
   Future<void> cancelSubscription(String clinicId) async {
-    await _firestore.collection('clinics').doc(clinicId).update({
-      // Set to yesterday to ensure it's immediately expired
-      'subscriptionEndDate': Timestamp.fromDate(
-        DateTime.now().subtract(const Duration(days: 1)),
-      ),
-    });
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinicId,
+      data: {
+        // Set to yesterday to ensure it's immediately expired
+        'subscriptionEndDate': DateTime.now()
+            .subtract(const Duration(days: 1))
+            .toUtc()
+            .toIso8601String(),
+      },
+    );
   }
 }

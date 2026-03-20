@@ -1,0 +1,4 @@
+Analyzing doc...                                                
+
+   info - Statements in an if should be enclosed in a block - lib\core\services\subscription_service.dart:151:9 - curly_braces_in_flow_control_structures
+

@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import '../domain/patient.dart';
@@ -8,8 +10,10 @@ import '../domain/models/medical_record.dart';
 import '../domain/models/prescription.dart';
 import '../data/patient_repository.dart';
 import '../data/prescription_service.dart';
+import '../domain/clinic_medications_provider.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/localization/language_provider.dart';
+import 'prescription_preview_screen.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
 import '../../../core/services/imgbb_service.dart';
 
@@ -80,17 +84,66 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: source,
-      imageQuality: 50,
-      maxWidth: 1080,
-      maxHeight: 1080,
-    );
-    if (pickedFile != null) {
-      setState(() {
-        _visitImages.add(File(pickedFile.path));
-      });
+    if (source == ImageSource.gallery) {
+      final pickedFiles = await picker.pickMultiImage(
+        imageQuality: 50,
+        maxWidth: 1080,
+        maxHeight: 1080,
+      );
+      if (pickedFiles.isNotEmpty) {
+        setState(() {
+          _visitImages.addAll(pickedFiles.map((p) => File(p.path)));
+        });
+      }
+    } else {
+      final pickedFile = await picker.pickImage(
+        source: source,
+        imageQuality: 50,
+        maxWidth: 1080,
+        maxHeight: 1080,
+      );
+      if (pickedFile != null) {
+        setState(() {
+          _visitImages.add(File(pickedFile.path));
+        });
+      }
     }
+  }
+
+  void _showImageSourcePicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (BuildContext context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Wrap(
+              children: <Widget>[
+                ListTile(
+                  leading: const Icon(Icons.photo_library, color: Colors.blue),
+                  title: Text(ref.tr('select_from_gallery')),
+                  onTap: () {
+                    _pickImage(ImageSource.gallery);
+                    Navigator.of(context).pop();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera, color: Colors.grey),
+                  title: Text(ref.tr('take_photo_camera')),
+                  onTap: () {
+                    _pickImage(ImageSource.camera);
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<List<String>> _uploadImages() async {
@@ -147,8 +200,53 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(ref.tr('save_success'))));
-        // Optional: Navigate back or refresh state
-        Navigator.pop(context);
+
+        if (_medications.isNotEmpty) {
+          final shouldPrint = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: const Text(
+                'طباعة الروشتة',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              content: const Text(
+                'تم حفظ الزيارة بنجاح. هل تريد طباعة الروشتة الآن؟',
+                style: TextStyle(fontSize: 14),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(
+                    ref.tr('no'),
+                    style: const TextStyle(color: Colors.grey),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).primaryColor,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(ref.tr('yes')),
+                ),
+              ],
+            ),
+          );
+
+          if (shouldPrint == true && mounted) {
+            await _printPrescription();
+          }
+        }
+
+        if (mounted) {
+          Navigator.pop(context);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -163,9 +261,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
   void _showPrescriptionDialog() {
     final nameController = TextEditingController();
-    final dosageController = TextEditingController();
-    final frequencyController = TextEditingController();
-    final durationController = TextEditingController();
+    final nameFocusNode = FocusNode();
     final instructionsController = TextEditingController();
 
     showDialog(
@@ -220,41 +316,97 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildDialogField(
-                        label: ref.tr('medication_name'),
-                        controller: nameController,
-                        icon: Icons.medication_outlined,
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _buildDialogField(
-                              label: ref.tr('dosage'),
-                              controller: dosageController,
-                              icon: Icons.science_outlined,
+                      RawAutocomplete<Medication>(
+                        textEditingController: nameController,
+                        focusNode: nameFocusNode,
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          if (textEditingValue.text.isEmpty) {
+                            return const Iterable<Medication>.empty();
+                          }
+                          final allMeds = ref.read(clinicMedicationsProvider);
+                          return allMeds.where(
+                            (med) => med.name.toLowerCase().contains(
+                              textEditingValue.text.toLowerCase(),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildDialogField(
-                              label: ref.tr('frequency'),
-                              controller: frequencyController,
-                              icon: Icons.repeat_on_outlined,
+                          );
+                        },
+                        displayStringForOption: (Medication med) => med.name,
+                        onSelected: (Medication selection) {
+                          if (instructionsController.text.isEmpty &&
+                              selection.instructions.isNotEmpty) {
+                            instructionsController.text =
+                                selection.instructions;
+                          }
+                        },
+                        fieldViewBuilder:
+                            (
+                              context,
+                              controller,
+                              focusNode,
+                              onEditingComplete,
+                            ) {
+                              return _buildDialogField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                icon: Icons.medication_outlined,
+                              );
+                            },
+                        optionsViewBuilder: (context, onSelected, options) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 8.0,
+                              borderRadius: BorderRadius.circular(16),
+                              color: Colors.transparent,
+                              child: Container(
+                                width: 300,
+                                constraints: const BoxConstraints(
+                                  maxHeight: 250,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1E1E1E).withAlpha(240),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: Colors.white.withAlpha(50),
+                                  ),
+                                ),
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  shrinkWrap: true,
+                                  itemCount: options.length,
+                                  itemBuilder: (context, index) {
+                                    final option = options.elementAt(index);
+                                    return ListTile(
+                                      title: Text(
+                                        option.name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                      subtitle: option.instructions.isNotEmpty
+                                          ? Text(
+                                              option.instructions,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white70,
+                                              ),
+                                            )
+                                          : null,
+                                      onTap: () {
+                                        onSelected(option);
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
                             ),
-                          ),
-                        ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
                       _buildDialogField(
-                        label: ref.tr('duration'),
-                        controller: durationController,
-                        icon: Icons.timer_outlined,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildDialogField(
-                        label: ref.tr('additional_instructions'),
                         controller: instructionsController,
                         icon: Icons.info_outline,
                         maxLines: 2,
@@ -270,9 +422,9 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                                 _medications.add(
                                   Medication(
                                     name: nameController.text.trim(),
-                                    dosage: dosageController.text.trim(),
-                                    frequency: frequencyController.text.trim(),
-                                    duration: durationController.text.trim(),
+                                    dosage: '',
+                                    frequency: '',
+                                    duration: '',
                                     instructions: instructionsController.text
                                         .trim(),
                                   ),
@@ -314,27 +466,31 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   }
 
   Widget _buildDialogField({
-    required String label,
+    String? label,
     required TextEditingController controller,
     required IconData icon,
     int maxLines = 1,
+    FocusNode? focusNode,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          softWrap: true,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: Colors.blue.shade900,
-            letterSpacing: 0.3,
+        if (label != null) ...[
+          Text(
+            label,
+            softWrap: true,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: Colors.blue.shade900,
+              letterSpacing: 0.3,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
+          const SizedBox(height: 8),
+        ],
         TextField(
           controller: controller,
+          focusNode: focusNode,
           maxLines: maxLines,
           style: const TextStyle(
             color: Colors.black87,
@@ -387,12 +543,24 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
       ),
     );
 
-    await PrescriptionService.printPrescription(
+    final pdfBytes = await PrescriptionService.generatePrescriptionPdf(
       clinic: clinic,
       patient: widget.patient,
       record: printRecord,
       languageCode: ref.read(languageProvider).languageCode,
     );
+
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PrescriptionPreviewScreen(
+            pdfBytes: pdfBytes,
+            title: '${ref.tr('prescription')} - ${widget.patient.name}',
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -448,7 +616,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   ...followUps.asMap().entries.map((entry) {
                     final index = followUps.length - entry.key;
                     return _buildFollowUpCard(entry.value, index);
-                  }).toList(),
+                  }),
                   const SizedBox(height: 20),
                 ],
                 ElevatedButton.icon(
@@ -486,22 +654,16 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.white.withAlpha(20),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withAlpha(5),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: Colors.white.withAlpha(50)),
       ),
       child: Row(
         children: [
           CircleAvatar(
             radius: 24,
-            backgroundColor: Colors.blue.withAlpha(20),
-            child: const Icon(Icons.person, color: Colors.blue),
+            backgroundColor: Colors.white.withAlpha(30),
+            child: const Icon(Icons.person, color: Colors.white),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -513,11 +675,12 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 18,
+                    color: Colors.white,
                   ),
                 ),
                 Text(
                   '${ref.tr('last_visit')}: ${DateFormat('yyyy/MM/dd').format(widget.record.date)}',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ],
             ),
@@ -528,61 +691,67 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   }
 
   Widget _buildMainRecordCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.blue.shade100, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.black.withAlpha(60),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withAlpha(50), width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.medical_services_outlined,
-                color: Colors.blue.shade700,
-                size: 20,
+              Row(
+                children: [
+                  const Icon(
+                    Icons.medical_services_outlined,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.record.isFinalized
+                        ? ref.tr('visit_details')
+                        : ref.tr('current_visit'),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    DateFormat('yyyy/MM/dd hh:mm a').format(widget.record.date),
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                widget.record.isFinalized
-                    ? ref.tr('visit_details')
-                    : ref.tr('current_visit'),
-                style: TextStyle(
-                  color: Colors.blue.shade900,
-                  fontWeight: FontWeight.bold,
-                ),
+              Divider(height: 24, color: Colors.white.withAlpha(50)),
+              _buildInputSection(
+                label: ref.tr('diagnosis'),
+                controller: _diagnosisController,
+                icon: Icons.assignment_outlined,
+                maxLines: 2,
               ),
-              const Spacer(),
-              Text(
-                DateFormat('yyyy/MM/dd hh:mm a').format(widget.record.date),
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+              const SizedBox(height: 16),
+              _buildInputSection(
+                label: ref.tr('doctor_notes'),
+                controller: _notesController,
+                icon: Icons.notes_outlined,
+                maxLines: 4,
               ),
+              const SizedBox(height: 20),
+              _buildVitalsGrid(),
+              const SizedBox(height: 20),
+              _buildPrescriptionSection(),
+              const SizedBox(height: 20),
+              _buildAttachmentsSection(),
             ],
           ),
-          const Divider(height: 24),
-          _buildInputSection(
-            label: ref.tr('diagnosis'),
-            controller: _diagnosisController,
-            icon: Icons.assignment_outlined,
-            maxLines: 2,
-          ),
-          const SizedBox(height: 16),
-          _buildInputSection(
-            label: ref.tr('doctor_notes'),
-            controller: _notesController,
-            icon: Icons.notes_outlined,
-            maxLines: 4,
-          ),
-          const SizedBox(height: 20),
-          _buildVitalsGrid(),
-          const SizedBox(height: 20),
-          _buildPrescriptionSection(),
-          const SizedBox(height: 20),
-          _buildAttachmentsSection(),
-        ],
+        ),
       ),
     );
   }
@@ -594,10 +763,6 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              ref.tr('prescription'),
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-            ),
             Flexible(
               child: FittedBox(
                 fit: BoxFit.scaleDown,
@@ -606,20 +771,20 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   children: [
                     TextButton.icon(
                       onPressed: _showPrescriptionDialog,
-                      icon: const Icon(Icons.edit_note, size: 18),
-                      label: Text(ref.tr('write_prescription')),
-                    ),
-                    if (_medications.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: _printPrescription,
-                        icon: const Icon(Icons.print, size: 18),
-                        label: Text(ref.tr('print')),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.green,
+                      icon: const Icon(
+                        Icons.add,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                      label: Text(
+                        ref.tr('add_medication'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
                         ),
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
@@ -632,31 +797,70 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             alignment: Alignment.center,
             child: Text(
               ref.tr('no_medications_added'),
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           )
         else
           ListView.builder(
             shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 8),
             physics: const NeverScrollableScrollPhysics(),
             itemCount: _medications.length,
             itemBuilder: (context, index) {
               final med = _medications[index];
-              return ListTile(
-                dense: true,
-                visualDensity: VisualDensity.compact,
-                title: Text(
-                  med.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(20),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withAlpha(50)),
                 ),
-                subtitle: Text(med.dosage),
-                trailing: IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    size: 18,
-                    color: Colors.red,
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
                   ),
-                  onPressed: () => setState(() => _medications.removeAt(index)),
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(30),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.medication,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    med.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: Colors.white,
+                    ),
+                  ),
+                  subtitle: med.instructions.isNotEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Text(
+                            med.instructions,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        )
+                      : null,
+                  trailing: IconButton(
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      size: 22,
+                      color: Colors.redAccent,
+                    ),
+                    onPressed: () =>
+                        setState(() => _medications.removeAt(index)),
+                  ),
                 ),
               );
             },
@@ -676,20 +880,32 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+            color: Colors.white,
+          ),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
           maxLines: maxLines,
+          style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            hintText: '${ref.tr('enter')} $label...',
-            prefixIcon: Icon(icon, size: 20),
+            prefixIcon: Icon(icon, size: 20, color: Colors.white70),
             filled: true,
-            fillColor: Colors.grey.shade50,
+            fillColor: Colors.white.withAlpha(20),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
+              borderSide: BorderSide(color: Colors.white.withAlpha(60)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.white.withAlpha(60)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.white, width: 2),
             ),
           ),
         ),
@@ -703,32 +919,39 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
       children: [
         Text(
           ref.tr('vital_signs'),
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+            color: Colors.white,
+          ),
         ),
-        const SizedBox(height: 8),
         GridView.count(
           shrinkWrap: true,
+          padding: EdgeInsets.zero,
           physics: const NeverScrollableScrollPhysics(),
           crossAxisCount: 2,
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
-          childAspectRatio: 2.5,
+          childAspectRatio: 1.8,
           children: [
             _buildVitalField(_bpController, ref.tr('bp'), Icons.speed_outlined),
             _buildVitalField(
               _weightController,
               ref.tr('weight'),
               Icons.monitor_weight_outlined,
+              keyboardType: TextInputType.number,
             ),
             _buildVitalField(
               _tempController,
               ref.tr('temp'),
               Icons.thermostat_outlined,
+              keyboardType: TextInputType.number,
             ),
             _buildVitalField(
               _sugarController,
               ref.tr('sugar'),
               Icons.water_drop_outlined,
+              keyboardType: TextInputType.number,
             ),
           ],
         ),
@@ -739,21 +962,50 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   Widget _buildVitalField(
     TextEditingController controller,
     String label,
-    IconData icon,
-  ) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, size: 18),
-        filled: true,
-        fillColor: Colors.grey.shade50,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
+    IconData icon, {
+    TextInputType? keyboardType,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+            color: Colors.white,
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: TextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              prefixIcon: Icon(icon, size: 18, color: Colors.white70),
+              filled: true,
+              fillColor: Colors.white.withAlpha(20),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 8,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.white.withAlpha(60)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.white.withAlpha(60)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Colors.white, width: 2),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -766,14 +1018,22 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
           children: [
             Text(
               ref.tr('attachments'),
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: Colors.white,
+              ),
             ),
             TextButton.icon(
-              onPressed: () => _pickImage(ImageSource.gallery),
-              icon: const Icon(Icons.add_a_photo_outlined, size: 16),
+              onPressed: () => _showImageSourcePicker(context),
+              icon: const Icon(
+                Icons.add_a_photo_outlined,
+                size: 16,
+                color: Colors.white,
+              ),
               label: Text(
                 ref.tr('attach_images'),
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 12, color: Colors.white),
               ),
             ),
           ],
@@ -783,16 +1043,16 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             height: 60,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
+              color: Colors.white.withAlpha(20),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: Colors.grey.shade200,
+                color: Colors.white.withAlpha(50),
                 style: BorderStyle.solid,
               ),
             ),
             child: Text(
               ref.tr('no_attachments'),
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           )
         else
@@ -879,7 +1139,12 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
   Widget _buildImage(String url) {
     if (url.startsWith('http')) {
-      return Image.network(url, width: 90, height: 90, fit: BoxFit.cover);
+      return CachedNetworkImage(
+        imageUrl: url,
+        width: 90,
+        height: 90,
+        fit: BoxFit.cover,
+      );
     } else {
       return Image.file(File(url), width: 90, height: 90, fit: BoxFit.cover);
     }

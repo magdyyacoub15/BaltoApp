@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -7,7 +8,7 @@ import '../domain/patient.dart';
 import 'package:intl/intl.dart';
 
 class PrescriptionService {
-  static Future<void> printPrescription({
+  static Future<Uint8List> generatePrescriptionPdf({
     required ClinicGroup clinic,
     required Patient patient,
     required MedicalRecord record,
@@ -17,10 +18,13 @@ class PrescriptionService {
     final font = await PdfGoogleFonts.notoSansArabicRegular();
     final boldFont = await PdfGoogleFonts.notoSansArabicBold();
     final iconFont = await PdfGoogleFonts.materialIcons();
+    final fallbackFont = await PdfGoogleFonts.notoSansRegular();
 
-    final PdfColor primaryColor = PdfColor.fromHex('#D32F2F'); // Dark Red
-    final PdfColor bgColor = PdfColor.fromHex('#FFF5F5'); // Light Pink
-    final PdfColor textColor = PdfColors.grey900;
+    final primaryColor = PdfColor.fromHex('#1A365D'); // Deep Navy Blue
+    final accentColor = PdfColor.fromHex('#00B5D8'); // Vibrant Cyan
+    final surfaceColor = PdfColor.fromHex('#F7FAFC'); // Very Light Blue/Gray
+    final textDark = PdfColor.fromHex('#2D3748'); // Dark Gray
+    final textLight = PdfColor.fromHex('#718096'); // Medium Gray
 
     final isArabic = languageCode == 'ar';
     final textDirection = isArabic
@@ -30,361 +34,366 @@ class PrescriptionService {
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a5,
-        theme: pw.ThemeData.withFont(base: font, bold: boldFont),
+        margin: pw.EdgeInsets.zero, // Edge-to-edge design
+        theme: pw.ThemeData.withFont(
+          base: font,
+          bold: boldFont,
+          fontFallback: [fallbackFont],
+        ),
         build: (pw.Context context) {
           return pw.Directionality(
             textDirection: textDirection,
-            child: pw.Container(
-              color: bgColor,
-              child: pw.Padding(
-                padding: const pw.EdgeInsets.all(20),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    // Header (Double)
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        // Left - English
-                        pw.Column(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                // Premium Top Header Banner
+                pw.Container(
+                  padding: const pw.EdgeInsets.only(
+                    top: 30,
+                    left: 20,
+                    right: 20,
+                    bottom: 20,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    color: primaryColor,
+                    borderRadius: const pw.BorderRadius.only(
+                      bottomLeft: pw.Radius.circular(24),
+                      bottomRight: pw.Radius.circular(24),
+                    ),
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Right - Text (Doctor Info)
+                      pw.Expanded(
+                        child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
                             pw.Text(
                               clinic.doctorName ?? clinic.name,
                               style: pw.TextStyle(
-                                fontSize: 18,
-                                color: primaryColor,
+                                color: PdfColors.white,
+                                fontSize: 22,
                                 fontWeight: pw.FontWeight.bold,
                               ),
                             ),
-                            if (clinic.specialization != null) ...[
-                              pw.Text(
-                                'Specialist of Cardiology', // Default Example if needed
-                                style: pw.TextStyle(
-                                  fontSize: 12,
-                                  color: textColor,
+                            if (clinic.specialization != null)
+                              pw.Padding(
+                                padding: const pw.EdgeInsets.only(top: 4),
+                                child: pw.Text(
+                                  clinic.specialization!,
+                                  style: pw.TextStyle(
+                                    color: accentColor,
+                                    fontSize: 14,
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                              pw.Text(
-                                'M.B.BCH',
-                                style: pw.TextStyle(
-                                  fontSize: 12,
-                                  color: textColor,
-                                ),
-                              ),
-                            ],
                           ],
                         ),
-                        // Right - Arabic
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.end,
-                          children: [
-                            pw.Text(
-                              clinic.doctorName ?? clinic.name,
-                              textDirection: pw.TextDirection.rtl,
-                              style: pw.TextStyle(
-                                fontSize: 18,
-                                color: primaryColor,
-                                fontWeight: pw.FontWeight.bold,
-                              ),
-                            ),
-                            if (clinic.specialization != null) ...[
-                              pw.Text(
-                                clinic.specialization!,
-                                textDirection: pw.TextDirection.rtl,
-                                style: pw.TextStyle(
-                                  fontSize: 12,
-                                  color: textColor,
-                                ),
-                              ),
-                              pw.Text(
-                                'ماجستير الأمراض الباطنية',
-                                textDirection: pw.TextDirection.rtl,
-                                style: pw.TextStyle(
-                                  fontSize: 12,
-                                  color: textColor,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 10),
-
-                    // Heartbeat Pulse Line Divider
-                    pw.Row(
-                      children: [
-                        pw.Expanded(
-                          child: pw.Container(
-                            height: 2,
-                            color: primaryColor.withAlpha(50),
-                          ),
-                        ),
-                        pw.Padding(
-                          padding: const pw.EdgeInsets.symmetric(
-                            horizontal: 10,
-                          ),
-                          child: pw.Container(
-                            width: 60,
-                            height: 30,
-                            child: pw.SvgImage(
-                              svg: '''
-<svg viewBox="0 0 100 50">
-  <path d="M0 25 H40 L45 15 L50 35 L55 20 L60 25 H100" stroke="#D32F2F" stroke-width="3" fill="none"/>
-  <path d="M50 25 m-5 0 a5 5 0 1 0 10 0 a5 5 0 1 0 -10 0" fill="#D32F2F"/>
-</svg>
-''',
-                            ),
-                          ),
-                        ),
-                        pw.Expanded(
-                          child: pw.Container(
-                            height: 2,
-                            color: primaryColor.withAlpha(50),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    pw.SizedBox(height: 15),
-
-                    // Patient Info Bar
-                    pw.Container(
-                      padding: const pw.EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
                       ),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border(
-                          top: pw.BorderSide(color: primaryColor, width: 2),
-                          bottom: pw.BorderSide(color: primaryColor, width: 2),
+                      // Left - Icon Area
+                      pw.Container(
+                        width: 50,
+                        height: 50,
+                        decoration: const pw.BoxDecoration(
+                          color: PdfColors.white,
+                          shape: pw.BoxShape.circle,
+                        ),
+                        child: pw.Center(
+                          child: pw.Icon(
+                            const pw.IconData(0xe548), // Medical Icon
+                            color: primaryColor,
+                            size: 28,
+                            font: iconFont,
+                          ),
                         ),
                       ),
-                      child: pw.Row(
-                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildInfoField(
-                            isArabic ? "الاسم" : "Name",
-                            patient.name,
-                            isArabic,
-                          ),
-                          _buildInfoField(
-                            isArabic ? "السن" : "Age",
-                            "${patient.age}",
-                            isArabic,
-                          ),
-                          _buildInfoField(
-                            isArabic ? "التاريخ" : "Date",
-                            DateFormat('yyyy/MM/dd').format(record.date),
-                            isArabic,
-                          ),
-                          _buildInfoField(
-                            isArabic ? "الاستشارة" : "Consultation",
-                            "/  /",
-                            isArabic,
-                          ),
-                        ],
-                      ),
-                    ),
-                    pw.SizedBox(height: 20),
+                    ],
+                  ),
+                ),
 
-                    // Rx and Vital Icons Row
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                // Main Body Content
+                pw.Expanded(
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 15,
+                    ),
+                    child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        // Rx Symbol
-                        pw.Text(
-                          'Rx',
-                          style: pw.TextStyle(
-                            fontSize: 48,
-                            fontWeight: pw.FontWeight.bold,
-                            fontItalic:
-                                font, // Try using a different font style if possible
-                            color: primaryColor,
-                          ),
-                        ),
-                        // Vital Icons placeholder (BP, Glucose, Heart)
-                        pw.Column(
-                          children: [
-                            _buildVitalIcon(PdfColors.black, 'BP'),
-                            pw.SizedBox(height: 10),
-                            _buildVitalIcon(PdfColors.black, 'Sugar'),
-                            pw.SizedBox(height: 10),
-                            _buildVitalIcon(PdfColors.black, 'Heart'),
-                          ],
-                        ),
-                      ],
-                    ),
-                    pw.SizedBox(height: 10),
-
-                    // Medications
-                    pw.Expanded(
-                      child: pw.ListView.builder(
-                        itemCount: record.medications.length,
-                        itemBuilder: (context, index) {
-                          final med = record.medications[index];
-                          return pw.Padding(
-                            padding: const pw.EdgeInsets.symmetric(vertical: 5),
-                            child: pw.Column(
-                              crossAxisAlignment: pw.CrossAxisAlignment.start,
-                              children: [
-                                pw.Text(
-                                  '${index + 1}. ${med.name}',
-                                  style: pw.TextStyle(
-                                    fontWeight: pw.FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                pw.Padding(
-                                  padding: const pw.EdgeInsets.only(left: 15),
-                                  child: pw.Text(
-                                    '${med.dosage} - ${med.frequency} (${med.duration})',
-                                    style: const pw.TextStyle(
-                                      fontSize: 11,
-                                      color: PdfColors.grey700,
-                                    ),
-                                  ),
-                                ),
-                                if (med.instructions.isNotEmpty)
-                                  pw.Padding(
-                                    padding: const pw.EdgeInsets.only(left: 15),
-                                    child: pw.Text(
-                                      'Note: ${med.instructions}',
-                                      style: pw.TextStyle(
-                                        fontSize: 10,
-                                        fontStyle: pw.FontStyle.italic,
-                                      ),
-                                    ),
-                                  ),
-                              ],
+                        // Modern Patient Info Card
+                        pw.Container(
+                          padding: const pw.EdgeInsets.all(12),
+                          decoration: pw.BoxDecoration(
+                            color: surfaceColor,
+                            borderRadius: pw.BorderRadius.circular(10),
+                            border: pw.Border.all(
+                              color: accentColor.withAlpha(0.3),
+                              width: 1,
                             ),
-                          );
-                        },
-                      ),
-                    ),
-
-                    pw.SizedBox(height: 20),
-                    // Colored Footer
-                    pw.Container(
-                      width: double.infinity,
-                      padding: const pw.EdgeInsets.all(10),
-                      decoration: pw.BoxDecoration(
-                        color: bgColor,
-                        border: pw.Border(
-                          top: pw.BorderSide(color: primaryColor, width: 2),
-                        ),
-                      ),
-                      child: pw.Row(
-                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
-                          // Left - Contacts
-                          pw.Column(
-                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          ),
+                          child: pw.Row(
+                            mainAxisAlignment:
+                                pw.MainAxisAlignment.spaceBetween,
                             children: [
-                              pw.Row(
-                                children: [
-                                  pw.Text(
-                                    clinic.phone ?? "",
-                                    style: const pw.TextStyle(fontSize: 10),
-                                  ),
-                                  pw.SizedBox(width: 5),
-                                  pw.Icon(
-                                    const pw.IconData(0xe0b0),
-                                    font: iconFont,
-                                    size: 12,
-                                    color: primaryColor,
-                                  ),
-                                ],
+                              _buildModernInfo(
+                                isArabic ? 'الاسم' : 'Name',
+                                patient.name,
+                                textLight,
+                                textDark,
                               ),
-                              pw.Row(
-                                children: [
-                                  pw.Text(
-                                    clinic.phone ?? "",
-                                    style: const pw.TextStyle(fontSize: 10),
-                                  ),
-                                  pw.SizedBox(width: 5),
-                                  pw.Icon(
-                                    const pw.IconData(
-                                      0xe8af,
-                                    ), // Whatsapp-like icon or generic chat
-                                    font: iconFont,
-                                    size: 12,
-                                    color: PdfColors.green,
-                                  ),
-                                ],
+                              _buildModernInfo(
+                                isArabic ? 'السن' : 'Age',
+                                '${patient.age}',
+                                textLight,
+                                textDark,
+                              ),
+                              _buildModernInfo(
+                                isArabic ? 'التاريخ' : 'Date',
+                                DateFormat('yyyy/MM/dd').format(record.date),
+                                textLight,
+                                textDark,
                               ),
                             ],
                           ),
-                          // Center - Address
-                          pw.Expanded(
+                        ),
+                        pw.SizedBox(height: 20),
+
+                        // Rx Header with subtle line
+                        pw.Row(
+                          crossAxisAlignment: pw.CrossAxisAlignment.center,
+                          children: [
+                            pw.Text(
+                              'Rx',
+                              style: pw.TextStyle(
+                                color: primaryColor,
+                                fontSize: 26,
+                                fontWeight: pw.FontWeight.bold,
+                                fontItalic: fallbackFont,
+                              ),
+                            ),
+                            pw.SizedBox(width: 12),
+                            pw.Expanded(
+                              child: pw.Container(
+                                height: 1.5,
+                                color: accentColor.withAlpha(0.2),
+                              ),
+                            ),
+                          ],
+                        ),
+                        pw.SizedBox(height: 15),
+
+                        // Medications List
+                        pw.Expanded(
+                          child: pw.ListView.builder(
+                            itemCount: record.medications.length,
+                            itemBuilder: (context, index) {
+                              final med = record.medications[index];
+                              return pw.Container(
+                                margin: const pw.EdgeInsets.only(bottom: 12),
+                                padding: const pw.EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: pw.BoxDecoration(
+                                  color: PdfColors.white,
+                                  borderRadius: pw.BorderRadius.circular(8),
+                                  border: pw.Border(
+                                    left: pw.BorderSide(
+                                      color: accentColor,
+                                      width: 3,
+                                    ), // Accent bar on the side
+                                    top: pw.BorderSide(
+                                      color: surfaceColor,
+                                      width: 1,
+                                    ),
+                                    right: pw.BorderSide(
+                                      color: surfaceColor,
+                                      width: 1,
+                                    ),
+                                    bottom: pw.BorderSide(
+                                      color: surfaceColor,
+                                      width: 1,
+                                    ),
+                                  ),
+                                ),
+                                child: pw.Column(
+                                  crossAxisAlignment:
+                                      pw.CrossAxisAlignment.stretch,
+                                  children: [
+                                    pw.Directionality(
+                                      textDirection: pw.TextDirection.ltr,
+                                      child: pw.Text(
+                                        med.name,
+                                        style: pw.TextStyle(
+                                          fontWeight: pw.FontWeight.bold,
+                                          fontSize: 15,
+                                          color: textDark,
+                                        ),
+                                      ),
+                                    ),
+                                    if (med.instructions.isNotEmpty)
+                                      pw.Padding(
+                                        padding: const pw.EdgeInsets.only(
+                                          top: 6,
+                                        ),
+                                        child: pw.Directionality(
+                                          textDirection: pw.TextDirection.rtl,
+                                          child: pw.Text(
+                                            med.instructions,
+                                            textAlign: pw.TextAlign.right,
+                                            style: pw.TextStyle(
+                                              fontSize: 13,
+                                              color: textLight,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+
+                        // Consultation Notice
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.symmetric(vertical: 8),
+                          child: pw.Center(
                             child: pw.Text(
-                              clinic.address ?? "Clinic Address",
-                              textAlign: pw.TextAlign.center,
-                              style: const pw.TextStyle(fontSize: 10),
+                              isArabic
+                                  ? 'الاستشارة خلال أسبوع مع ضرورة إحضار الروشتة'
+                                  : 'Consultation within a week with prescription',
+                              style: pw.TextStyle(
+                                color: primaryColor,
+                                fontSize: 12,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
                             ),
                           ),
-                          // Right - QR Code
-                          pw.Container(
-                            width: 40,
-                            height: 40,
-                            child: pw.BarcodeWidget(
-                              barcode: pw.Barcode.qrCode(),
-                              data: clinic.id,
-                              drawText: false,
-                            ),
-                          ),
-                        ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Premium Footer
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 15,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    color: surfaceColor,
+                    border: pw.Border(
+                      top: pw.BorderSide(
+                        color: accentColor.withAlpha(0.2),
+                        width: 1,
                       ),
                     ),
-                  ],
+                  ),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Contact Info
+                      pw.Expanded(
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            _buildFooterLine(
+                              iconFont,
+                              0xe0c8, // Location icon
+                              clinic.address ??
+                                  (isArabic
+                                      ? 'العنوان غير محدد'
+                                      : 'Address not set'),
+                              accentColor,
+                              textDark,
+                            ),
+                            pw.SizedBox(height: 6),
+                            if (clinic.phone != null)
+                              _buildFooterLine(
+                                iconFont,
+                                0xe0b0, // Phone icon
+                                isArabic
+                                    ? 'محمول: ${clinic.phone}'
+                                    : 'Phone: ${clinic.phone}',
+                                accentColor,
+                                textDark,
+                              ),
+                          ],
+                        ),
+                      ),
+                      // QR Code
+                      pw.Container(
+                        width: 45,
+                        height: 45,
+                        padding: const pw.EdgeInsets.all(2),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.white,
+                          borderRadius: pw.BorderRadius.circular(6),
+                          border: pw.Border.all(
+                            color: accentColor.withAlpha(0.2),
+                          ),
+                        ),
+                        child: pw.BarcodeWidget(
+                          barcode: pw.Barcode.qrCode(),
+                          data: clinic.id,
+                          color: primaryColor,
+                          drawText: false,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
             ),
           );
         },
       ),
     );
 
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-    );
+    return await pdf.save();
   }
 
-  static pw.Widget _buildInfoField(String label, String value, bool isArabic) {
-    return pw.Row(
-      mainAxisSize: pw.MainAxisSize.min,
+  static pw.Widget _buildModernInfo(
+    String label,
+    String value,
+    PdfColor lightText,
+    PdfColor darkText,
+  ) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
+        pw.Text(label, style: pw.TextStyle(fontSize: 10, color: lightText)),
+        pw.SizedBox(height: 2),
         pw.Text(
-          '$label: ',
-          style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
+          value,
+          style: pw.TextStyle(
+            fontSize: 13,
+            fontWeight: pw.FontWeight.bold,
+            color: darkText,
+          ),
         ),
-        pw.Text(value, style: const pw.TextStyle(fontSize: 11)),
       ],
     );
   }
 
-  static pw.Widget _buildVitalIcon(PdfColor color, String label) {
-    // Simplified icons for now
-    return pw.Container(
-      width: 25,
-      height: 25,
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: color, width: 1),
-        shape: pw.BoxShape.circle,
-      ),
-      child: pw.Center(
-        child: pw.Text(
-          label[0],
-          style: pw.TextStyle(
-            fontSize: 10,
-            fontWeight: pw.FontWeight.bold,
-            color: color,
-          ),
-        ),
-      ),
+  static pw.Widget _buildFooterLine(
+    pw.Font iconFont,
+    int iconCode,
+    String text,
+    PdfColor color,
+    PdfColor textColor,
+  ) {
+    return pw.Row(
+      children: [
+        pw.Icon(pw.IconData(iconCode), font: iconFont, color: color, size: 14),
+        pw.SizedBox(width: 8),
+        pw.Text(text, style: pw.TextStyle(fontSize: 11, color: textColor)),
+      ],
     );
   }
 }

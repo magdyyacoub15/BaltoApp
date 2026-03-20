@@ -1,19 +1,99 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+// ignore_for_file: deprecated_member_use
+import 'package:appwrite/appwrite.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/appointment.dart';
+import '../../../core/services/appwrite_client.dart';
+import '../../../core/services/hive_cache_service.dart';
+import '../../../core/services/connectivity_service.dart';
 
 final appointmentRepositoryProvider = Provider(
-  (ref) => AppointmentRepository(),
+  (ref) => AppointmentRepository(
+    ref.read(appwriteDatabasesProvider),
+    ref.read(hiveCacheServiceProvider),
+  ),
 );
 
 class AppointmentRepository {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final Databases _databases;
+  final HiveCacheService _cache;
 
-  // Stream of appointments for a specific clinic.
-  // If [date] is provided, returns all appointments for that day.
-  // If [startAfter] is provided, returns appointments after that timestamp.
-  Stream<List<Appointment>> getAppointments(
+  AppointmentRepository(this._databases, this._cache);
+
+  /// Cache-First: returns cached appointments instantly, refreshes in background.
+  Future<List<Appointment>> getAppointments(
     String clinicId, {
+    DateTime? date,
+    DateTime? startAfter,
+  }) async {
+    final cached = _cache.getCachedAppointments(clinicId);
+
+    if (cached != null) {
+      _refreshAppointmentsInBackground(clinicId);
+      final all = cached
+          .map((m) => Appointment.fromMap(m, m['id'] ?? ''))
+          .toList();
+      return _filterAndSort(all, date: date, startAfter: startAfter);
+    }
+    return _fetchAndCache(clinicId, date: date, startAfter: startAfter);
+  }
+
+  Future<List<Appointment>> refreshAppointments(String clinicId) async {
+    return _fetchAndCache(clinicId);
+  }
+
+  void _refreshAppointmentsInBackground(String clinicId) {
+    _fetchAndCache(clinicId).catchError((e) {
+      debugPrint('AppointmentRepository: bg refresh error: $e');
+      return <Appointment>[];
+    });
+  }
+
+  Future<List<Appointment>> _fetchAndCache(
+    String clinicId, {
+    DateTime? date,
+    DateTime? startAfter,
+  }) async {
+    try {
+      final isOnline = await checkIsOnline();
+      if (!isOnline) {
+        final cached = _cache.getCachedAppointments(clinicId);
+        final all =
+            cached
+                ?.map((m) => Appointment.fromMap(m, m['id'] ?? ''))
+                .toList() ??
+            [];
+        return _filterAndSort(all, date: date, startAfter: startAfter);
+      }
+
+      final res = await _databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'appointments',
+        queries: [Query.equal('clinicId', clinicId), Query.limit(250)],
+      );
+
+      final all = res.documents
+          .map((doc) => Appointment.fromMap(doc.data, doc.$id))
+          .toList();
+
+      // Store in cache with ID
+      _cache.cacheAppointments(
+        clinicId,
+        all.map((a) => {...a.toMap(), 'id': a.id}).toList(),
+      );
+
+      return _filterAndSort(all, date: date, startAfter: startAfter);
+    } catch (_) {
+      final cached = _cache.getCachedAppointments(clinicId);
+      final all =
+          cached?.map((m) => Appointment.fromMap(m, m['id'] ?? '')).toList() ??
+          [];
+      return _filterAndSort(all, date: date, startAfter: startAfter);
+    }
+  }
+
+  List<Appointment> _filterAndSort(
+    List<Appointment> all, {
     DateTime? date,
     DateTime? startAfter,
   }) {
@@ -29,85 +109,85 @@ class AppointmentRepository {
       endThreshold = null;
     }
 
-    return _firestore
-        .collection('appointments')
-        .where('clinicId', isEqualTo: clinicId)
-        .snapshots()
-        .map((snapshot) {
-          final docs = snapshot.docs
-              .map((doc) => Appointment.fromMap(doc.data(), doc.id))
-              .where((appt) {
-                final isAfter =
-                    appt.date.isAfter(startThreshold) ||
-                    appt.date.isAtSameMomentAs(startThreshold);
-                final isBefore =
-                    endThreshold == null || appt.date.isBefore(endThreshold);
-                return isAfter && isBefore;
-              })
-              .toList();
-          docs.sort((a, b) {
-            // Completed appointments go to the bottom
-            if (a.isCompleted && !b.isCompleted) return 1;
-            if (!a.isCompleted && b.isCompleted) return -1;
+    final docs = all.where((appt) {
+      final isAfter =
+          appt.date.isAfter(startThreshold) ||
+          appt.date.isAtSameMomentAs(startThreshold);
+      final isBefore = endThreshold == null || appt.date.isBefore(endThreshold);
+      return isAfter && isBefore;
+    }).toList();
 
-            // If both have the same completion status, sort by queueOrder
-            if (a.queueOrder != b.queueOrder) {
-              return a.queueOrder.compareTo(b.queueOrder);
-            }
+    docs.sort((a, b) {
+      if (a.isCompleted && !b.isCompleted) return 1;
+      if (!a.isCompleted && b.isCompleted) return -1;
+      if (a.queueOrder != b.queueOrder) {
+        return a.queueOrder.compareTo(b.queueOrder);
+      }
+      return a.date.compareTo(b.date);
+    });
 
-            // Fallback to chronological order
-            return a.date.compareTo(b.date);
-          });
-          return docs;
-        });
+    return docs;
   }
 
-  // Stream of future appointments (for reminders)
-  Stream<List<Appointment>> getUpcomingAppointments(String clinicId) {
+  Future<List<Appointment>> getUpcomingAppointments(String clinicId) async {
     final now = DateTime.now();
-
-    return _firestore
-        .collection('appointments')
-        .where('clinicId', isEqualTo: clinicId)
-        .snapshots()
-        .map((snapshot) {
-          final docs = snapshot.docs
-              .map((doc) => Appointment.fromMap(doc.data(), doc.id))
-              .where((appt) => appt.date.isAfter(now))
-              .toList();
-          docs.sort((a, b) {
-            if (a.isCompleted && !b.isCompleted) return 1;
-            if (!a.isCompleted && b.isCompleted) return -1;
-            if (a.queueOrder != b.queueOrder) {
-              return a.queueOrder.compareTo(b.queueOrder);
-            }
-            return a.date.compareTo(b.date);
-          });
-          return docs;
-        });
+    final all = await getAppointments(clinicId);
+    final upcoming = all.where((appt) => appt.date.isAfter(now)).toList();
+    upcoming.sort((a, b) {
+      if (a.isCompleted && !b.isCompleted) return 1;
+      if (!a.isCompleted && b.isCompleted) return -1;
+      if (a.queueOrder != b.queueOrder) {
+        return a.queueOrder.compareTo(b.queueOrder);
+      }
+      return a.date.compareTo(b.date);
+    });
+    return upcoming;
   }
 
   Future<void> addAppointment(Appointment appointment) async {
-    await _firestore.collection('appointments').add(appointment.toMap());
+    await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'appointments',
+      documentId: ID.unique(),
+      data: appointment.toMap(),
+    );
+    _refreshAppointmentsInBackground(appointment.clinicId);
   }
 
   Future<void> updateAppointment(Appointment appointment) async {
-    await _firestore
-        .collection('appointments')
-        .doc(appointment.id)
-        .update(appointment.toMap());
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'appointments',
+      documentId: appointment.id,
+      data: appointment.toMap(),
+    );
+    _refreshAppointmentsInBackground(appointment.clinicId);
   }
 
   Future<void> updateQueueOrder(List<Appointment> appointments) async {
-    final batch = _firestore.batch();
+    final futures = <Future>[];
     for (final appt in appointments) {
-      final docRef = _firestore.collection('appointments').doc(appt.id);
-      batch.update(docRef, {'queueOrder': appt.queueOrder});
+      futures.add(
+        _databases.updateDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'appointments',
+          documentId: appt.id,
+          data: {'queueOrder': appt.queueOrder},
+        ),
+      );
     }
-    await batch.commit();
+    await Future.wait(futures);
+    if (appointments.isNotEmpty) {
+      _refreshAppointmentsInBackground(appointments.first.clinicId);
+    }
   }
 
-  Future<void> deleteAppointment(String id) async {
-    await _firestore.collection('appointments').doc(id).delete();
+  Future<void> deleteAppointment(String id, String clinicId) async {
+    await _databases.deleteDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'appointments',
+      documentId: id,
+    );
+    _refreshAppointmentsInBackground(clinicId);
   }
 }

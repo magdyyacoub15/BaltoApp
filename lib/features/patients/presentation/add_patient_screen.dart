@@ -86,6 +86,10 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         _matchedPatient = match;
         _isSearching = false;
 
+        if (match == null && widget.patient == null) {
+          _examType = 'new_examination';
+        }
+
         if (match != null) {
           if (_phoneController.text.isEmpty ||
               (previousMatch != null &&
@@ -224,20 +228,18 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
           ),
         );
 
-        // Initial Medical Record if paid
-        if (paid > 0) {
-          await repo.addMedicalRecord(
-            patientId,
-            MedicalRecord(
-              id: '',
-              date: DateTime.now(),
-              diagnosis: '',
-              doctorNotes: '',
-              paidAmount: paid,
-              remainingAmount: remaining,
-            ),
-          );
-        }
+        // Initial Medical Record
+        await repo.addMedicalRecord(
+          patientId,
+          MedicalRecord(
+            id: '',
+            date: DateTime.now(),
+            diagnosis: '',
+            doctorNotes: '',
+            paidAmount: paid,
+            remainingAmount: remaining,
+          ),
+        );
       } else {
         // Editing existing patient or using smart-detected one
         final targetPatient = widget.patient ?? _matchedPatient!;
@@ -269,32 +271,30 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
           ),
         );
 
-        // Create Medical Record / Follow-up if paid
-        if (paid > 0) {
-          String? parentId;
-          if (_examType == 're_examination') {
-            final mainRecords = targetPatient.records
-                .where((r) => r.parentRecordId == null)
-                .toList();
-            if (mainRecords.isNotEmpty) {
-              mainRecords.sort((a, b) => b.date.compareTo(a.date));
-              parentId = mainRecords.first.id;
-            }
+        // Create Medical Record / Follow-up
+        String? parentId;
+        if (_examType == 're_examination') {
+          final mainRecords = targetPatient.records
+              .where((r) => r.parentRecordId == null)
+              .toList();
+          if (mainRecords.isNotEmpty) {
+            mainRecords.sort((a, b) => b.date.compareTo(a.date));
+            parentId = mainRecords.first.id;
           }
-
-          await repo.addMedicalRecord(
-            patientId,
-            MedicalRecord(
-              id: '',
-              date: DateTime.now(),
-              diagnosis: '',
-              doctorNotes: '',
-              paidAmount: paid,
-              remainingAmount: remaining,
-              parentRecordId: parentId,
-            ),
-          );
         }
+
+        await repo.addMedicalRecord(
+          patientId,
+          MedicalRecord(
+            id: '',
+            date: DateTime.now(),
+            diagnosis: '',
+            doctorNotes: '',
+            paidAmount: paid,
+            remainingAmount: remaining,
+            parentRecordId: parentId,
+          ),
+        );
       }
 
       // Financial Transaction
@@ -400,28 +400,31 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
                               v!.isEmpty ? ref.tr('enter_name_error') : null,
                         ),
                         const SizedBox(height: 16),
-                        _buildSectionTitle(ref.tr('current_visit_details')),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildExamTypeButton(
-                                label: ref.tr('new_examination'),
-                                type: 'new_examination',
-                                icon: Icons.personal_injury_outlined,
+                        if (widget.patient != null ||
+                            _matchedPatient != null) ...[
+                          _buildSectionTitle(ref.tr('current_visit_details')),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _buildExamTypeButton(
+                                  label: ref.tr('new_examination'),
+                                  type: 'new_examination',
+                                  icon: Icons.personal_injury_outlined,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildExamTypeButton(
-                                label: ref.tr('re_examination'),
-                                type: 're_examination',
-                                icon: Icons.history_edu_outlined,
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _buildExamTypeButton(
+                                  label: ref.tr('re_examination'),
+                                  type: 're_examination',
+                                  icon: Icons.history_edu_outlined,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         _buildTextField(
                           controller: _phoneController,
                           label: ref.tr('phone_number'),

@@ -3,21 +3,15 @@ import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'patient.dart';
 
-// Live stream of all patients for the current user's clinic
-final patientsStreamProvider = StreamProvider<List<Patient>>((ref) {
-  final userAsync = ref.watch(currentUserProvider);
+// Future provider of all patients for the current user's clinic
+final patientsStreamProvider = FutureProvider<List<Patient>>((ref) async {
+  final user = await ref.watch(currentUserProvider.future);
   final repo = ref.watch(patientRepositoryProvider);
 
-  return userAsync.when(
-    data: (user) {
-      if (user != null) {
-        return repo.getPatients(user.clinicId);
-      }
-      return Stream.value([]);
-    },
-    loading: () => Stream.value([]),
-    error: (e, st) => Stream.error(e, st),
-  );
+  if (user != null) {
+    return await repo.getPatients(user.clinicId);
+  }
+  return [];
 });
 
 // Search query notifier for filtering results locally
@@ -51,39 +45,37 @@ final patientSortProvider = NotifierProvider<PatientSortNotifier, PatientSort>(
 );
 
 // Filtered patient list combining the live stream, the search query, and excluding new patients added today
-final filteredPatientsProvider = Provider<AsyncValue<List<Patient>>>((ref) {
-  final patientsAsync = ref.watch(patientsStreamProvider);
+final filteredPatientsProvider = FutureProvider<List<Patient>>((ref) async {
+  final patients = await ref.watch(patientsStreamProvider.future);
   final query = ref.watch(searchQueryProvider).toLowerCase();
-  final threshold = ref.watch(clinicVisibilityThresholdProvider);
+  final threshold = await ref.watch(clinicVisibilityThresholdProvider.future);
   final sort = ref.watch(patientSortProvider);
 
-  return patientsAsync.whenData((patients) {
-    // 1. Exclude entirely new patients added during the current shift
-    var filtered = patients.where((p) {
-      final isNewToday =
-          p.records.length == 1 &&
-          (p.lastVisit.isAfter(threshold) ||
-              p.lastVisit.isAtSameMomentAs(threshold));
-      return !isNewToday;
-    }).toList();
+  // 1. Exclude entirely new patients added during the current shift
+  var filtered = patients.where((p) {
+    final isNewToday =
+        p.records.length == 1 &&
+        (p.lastVisit.isAfter(threshold) ||
+            p.lastVisit.isAtSameMomentAs(threshold));
+    return !isNewToday;
+  }).toList();
 
-    // 2. Apply search query
-    if (query.isNotEmpty) {
-      filtered = filtered
-          .where(
-            (p) =>
-                p.name.toLowerCase().contains(query) || p.phone.contains(query),
-          )
-          .toList();
-    }
+  // 2. Apply search query
+  if (query.isNotEmpty) {
+    filtered = filtered
+        .where(
+          (p) =>
+              p.name.toLowerCase().contains(query) || p.phone.contains(query),
+        )
+        .toList();
+  }
 
-    // 3. Apply sorting
-    if (sort == PatientSort.name) {
-      filtered.sort((a, b) => a.name.compareTo(b.name));
-    } else {
-      filtered.sort((a, b) => b.lastVisit.compareTo(a.lastVisit));
-    }
+  // 3. Apply sorting
+  if (sort == PatientSort.name) {
+    filtered.sort((a, b) => a.name.compareTo(b.name));
+  } else {
+    filtered.sort((a, b) => b.lastVisit.compareTo(a.lastVisit));
+  }
 
-    return filtered;
-  });
+  return filtered;
 });

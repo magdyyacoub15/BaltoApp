@@ -5,8 +5,11 @@ import '../domain/appointment.dart';
 import '../data/appointment_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../patients/domain/patients_provider.dart';
+import '../../patients/domain/models/medical_record.dart';
+import '../../patients/data/patient_repository.dart';
 import '../../patients/presentation/add_patient_screen.dart';
 import '../../../core/localization/language_provider.dart';
+import 'package:uuid/uuid.dart';
 
 class SelectedDateNotifier extends Notifier<DateTime> {
   @override
@@ -22,24 +25,17 @@ final selectedDateProvider = NotifierProvider<SelectedDateNotifier, DateTime>(
 );
 
 // Live stream of appointments for the selected date
-final appointmentsForSelectedDateProvider = StreamProvider<List<Appointment>>((
+final appointmentsForSelectedDateProvider = FutureProvider<List<Appointment>>((
   ref,
-) {
-  final userAsync = ref.watch(currentUserProvider);
+) async {
+  final user = await ref.watch(currentUserProvider.future);
   final repo = ref.watch(appointmentRepositoryProvider);
   final selectedDate = ref.watch(selectedDateProvider);
 
-  return userAsync.when(
-    data: (user) {
-      if (user != null) {
-        // Explicitly using named parameter 'date'
-        return repo.getAppointments(user.clinicId, date: selectedDate);
-      }
-      return Stream.value([]);
-    },
-    loading: () => Stream.value([]),
-    error: (e, st) => Stream.error(e, st),
-  );
+  if (user != null) {
+    return await repo.getAppointments(user.clinicId, date: selectedDate);
+  }
+  return [];
 });
 
 // Enriched appointments for the selected date
@@ -315,6 +311,36 @@ class AppointmentsListScreen extends ConsumerWidget {
     await ref
         .read(appointmentRepositoryProvider)
         .addAppointment(newAppointment);
+
+    // Create an unfinalized MedicalRecord for the current visit
+    final patientRepo = ref.read(patientRepositoryProvider);
+    String? parentId;
+    final mainRecords = patient.records
+        .where((r) => r.parentRecordId == null)
+        .toList();
+    if (mainRecords.isNotEmpty) {
+      mainRecords.sort((a, b) => b.date.compareTo(a.date));
+      parentId = mainRecords.first.id;
+    }
+
+    final newRecord = MedicalRecord(
+      id: const Uuid().v4(),
+      date: DateTime.now(),
+      diagnosis: '',
+      vitalSigns: VitalSigns(
+        bloodPressure: '',
+        weight: 0.0,
+        temperature: 0.0,
+        sugarLevel: 0.0,
+      ),
+      doctorNotes: '',
+      attachmentUrls: [],
+      isFinalized: false,
+      medications: [],
+      parentRecordId: parentId,
+    );
+    await patientRepo.addMedicalRecord(patient.id, newRecord);
+
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(ref.tr('added_to_queue', [patient.name]))),

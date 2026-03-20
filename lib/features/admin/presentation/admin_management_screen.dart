@@ -1,7 +1,9 @@
+// ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/models.dart' as models;
 import '../../auth/presentation/auth_providers.dart';
 import '../../auth/data/auth_repository.dart';
 import '../../auth/domain/models/app_user.dart';
@@ -9,6 +11,7 @@ import '../../../core/presentation/widgets/animated_gradient_background.dart';
 import '../../../core/presentation/widgets/delete_confirmation_dialog.dart';
 import '../../../core/services/permission_service.dart';
 import '../../../core/localization/language_provider.dart';
+import '../../../core/services/appwrite_client.dart';
 
 class AdminManagementScreen extends ConsumerWidget {
   const AdminManagementScreen({super.key});
@@ -179,11 +182,14 @@ class AdminManagementScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
 
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('users')
-                .where('clinicId', isEqualTo: adminUser.clinicId)
-                .snapshots(),
+          FutureBuilder<models.DocumentList>(
+            future: ref
+                .read(appwriteDatabasesProvider)
+                .listDocuments(
+                  databaseId: appwriteDatabaseId,
+                  collectionId: 'users',
+                  queries: [Query.equal('clinicId', adminUser.clinicId)],
+                ),
             builder: (context, snapshot) {
               if (snapshot.hasError) {
                 return Text(ref.tr('error_label', [snapshot.error.toString()]));
@@ -194,13 +200,8 @@ class AdminManagementScreen extends ConsumerWidget {
                 );
               }
 
-              final users = snapshot.data!.docs
-                  .map(
-                    (doc) => AppUser.fromMap(
-                      doc.data() as Map<String, dynamic>,
-                      doc.id,
-                    ),
-                  )
+              final users = snapshot.data!.documents
+                  .map((doc) => AppUser.fromMap(doc.data, doc.$id))
                   .toList();
 
               return ListView.builder(
@@ -241,10 +242,14 @@ class AdminManagementScreen extends ConsumerWidget {
                           ? Chip(label: Text(ref.tr('system_admin')))
                           : PopupMenuButton<String>(
                               onSelected: (newValue) async {
-                                await FirebaseFirestore.instance
-                                    .collection('users')
-                                    .doc(employee.id)
-                                    .update({'role': newValue});
+                                await ref
+                                    .read(appwriteDatabasesProvider)
+                                    .updateDocument(
+                                      databaseId: appwriteDatabaseId,
+                                      collectionId: 'users',
+                                      documentId: employee.id,
+                                      data: {'role': newValue},
+                                    );
                               },
                               itemBuilder: (context) => [
                                 PopupMenuItem(
@@ -288,18 +293,23 @@ class AdminManagementScreen extends ConsumerWidget {
     WidgetRef ref,
     AppUser adminUser,
   ) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .where('clinicId', isEqualTo: adminUser.clinicId)
-          .where('isApproved', isEqualTo: false)
-          .snapshots(),
+    return FutureBuilder<models.DocumentList>(
+      future: ref
+          .read(appwriteDatabasesProvider)
+          .listDocuments(
+            databaseId: appwriteDatabaseId,
+            collectionId: 'users',
+            queries: [
+              Query.equal('clinicId', adminUser.clinicId),
+              Query.equal('isApproved', false),
+            ],
+          ),
       builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+        if (!snapshot.hasData || snapshot.data!.documents.isEmpty) {
           return const SizedBox.shrink();
         }
 
-        final pendingUsers = snapshot.data!.docs;
+        final pendingUsers = snapshot.data!.documents;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -335,10 +345,7 @@ class AdminManagementScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 12),
                   ...pendingUsers.map((doc) {
-                    final user = AppUser.fromMap(
-                      doc.data() as Map<String, dynamic>,
-                      doc.id,
-                    );
+                    final user = AppUser.fromMap(doc.data, doc.$id);
                     return Card(
                       color: Colors.white.withAlpha(40),
                       shape: RoundedRectangleBorder(

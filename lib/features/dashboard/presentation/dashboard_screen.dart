@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../patients/presentation/add_patient_screen.dart';
 import '../../patients/presentation/patient_profile_screen.dart';
 import '../../appointments/domain/appointments_provider.dart';
+import '../../patients/domain/patients_provider.dart';
 import '../../appointments/data/appointment_repository.dart';
 import '../../appointments/domain/appointment.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -611,12 +612,13 @@ class DashboardScreen extends ConsumerWidget {
                       },
                       onDismissed: (direction) async {
                         final apptId = appt.id;
+                        final apptClinicId = appt.clinicId;
                         final patientName =
                             appt.patient?.name ?? ref.tr('unknown_patient');
 
                         await ref
                             .read(appointmentRepositoryProvider)
-                            .deleteAppointment(apptId);
+                            .deleteAppointment(apptId, apptClinicId);
 
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -745,7 +747,8 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   void _showIncomeDetailsDialog(BuildContext context, WidgetRef ref) {
-    final threshold = ref.read(clinicVisibilityThresholdProvider);
+    final threshold =
+        ref.read(clinicVisibilityThresholdProvider).value ?? DateTime(2000);
     final transactionsAsync = ref.watch(transactionsStreamProvider);
 
     showDialog(
@@ -857,7 +860,8 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   void _showExpenseDetailsDialog(BuildContext context, WidgetRef ref) {
-    final threshold = ref.read(clinicVisibilityThresholdProvider);
+    final threshold =
+        ref.read(clinicVisibilityThresholdProvider).value ?? DateTime(2000);
     final transactionsAsync = ref.watch(transactionsStreamProvider);
 
     showDialog(
@@ -1105,9 +1109,10 @@ class DashboardScreen extends ConsumerWidget {
           ElevatedButton(
             onPressed: () async {
               // Finalize all remaining patient records from today
+              final patientsList = ref.read(patientsStreamProvider).value ?? [];
               await ref
                   .read(patientRepositoryProvider)
-                  .finalizeAllPendingRecords(clinicId);
+                  .finalizeAllPendingRecords(patientsList);
 
               // Reset shift visibility threshold
               await ref.read(authRepositoryProvider).resetShift(clinicId);

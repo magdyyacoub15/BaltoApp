@@ -1,58 +1,103 @@
+// ignore_for_file: deprecated_member_use
 import 'dart:math';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/models.dart' as models;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/services/appwrite_client.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/clinic_group.dart';
 import '../domain/models/clinic_membership.dart';
 
-final authRepositoryProvider = Provider((ref) => AuthRepository());
+final authRepositoryProvider = Provider((ref) {
+  final account = ref.watch(appwriteAccountProvider);
+  final databases = ref.watch(appwriteDatabasesProvider);
+  return AuthRepository(account, databases);
+});
 
 class AuthRepository {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final Account _account;
+  final Databases _databases;
+  final _authStateController = StreamController<models.User?>.broadcast();
 
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  AuthRepository(this._account, this._databases) {
+    _initAuthState();
+  }
 
-  // Get current AppUser data from Firestore
-  Stream<AppUser?> getUserData(String uid) {
-    return _firestore.collection('users').doc(uid).snapshots().map((doc) {
-      if (doc.exists) {
-        return AppUser.fromMap(doc.data()!, doc.id);
-      }
+  void _initAuthState() async {
+    try {
+      final user = await _account.get();
+      if (!_authStateController.isClosed) _authStateController.add(user);
+    } catch (_) {
+      if (!_authStateController.isClosed) _authStateController.add(null);
+    }
+  }
+
+  Stream<models.User?> get authStateChanges => _authStateController.stream;
+
+  // Get current AppUser data
+  Future<AppUser?> getUserData(String uid) async {
+    try {
+      final doc = await _databases.getDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'users',
+        documentId: uid,
+      );
+      return AppUser.fromMap(doc.data, doc.$id);
+    } catch (e) {
       return null;
-    });
+    }
   }
 
   // Get Clinic details
-  Stream<ClinicGroup?> getClinicData(String clinicId) {
-    return _firestore.collection('clinics').doc(clinicId).snapshots().map((
-      doc,
-    ) {
-      if (doc.exists) {
-        return ClinicGroup.fromMap(doc.data()!, doc.id);
-      }
+  Future<ClinicGroup?> getClinicData(String clinicId) async {
+    try {
+      final doc = await _databases.getDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'clinics',
+        documentId: clinicId,
+      );
+      return ClinicGroup.fromMap(doc.data, doc.$id);
+    } catch (e) {
       return null;
-    });
+    }
   }
 
   // Manual Shift Reset
   Future<void> resetShift(String clinicId) async {
-    await _firestore.collection('clinics').doc(clinicId).update({
-      'lastShiftReset': FieldValue.serverTimestamp(),
-    });
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinicId,
+      data: {'lastShiftReset': DateTime.now().toIso8601String()},
+    );
   }
 
   Future<void> login(String email, String password) async {
-    await _auth.signInWithEmailAndPassword(email: email, password: password);
+    await _account.createEmailPasswordSession(email: email, password: password);
+    // Emit updated user after successful login
+    try {
+      final user = await _account.get();
+      if (!_authStateController.isClosed) _authStateController.add(user);
+    } catch (_) {
+      if (!_authStateController.isClosed) _authStateController.add(null);
+    }
   }
 
   Future<void> logOut() async {
-    await _auth.signOut();
+    try {
+      await _account.deleteSession(sessionId: 'current');
+    } catch (_) {}
+    if (!_authStateController.isClosed) _authStateController.add(null);
   }
 
   Future<void> resetPassword(String email) async {
-    await _auth.sendPasswordResetEmail(email: email);
+    // Appwrite requires a callback URL for password recovery
+    await _account.createRecovery(
+      email: email,
+      url: 'https://balto.pro/reset-password',
+    );
   }
 
   // Create new Clinic (Admin)
@@ -64,41 +109,60 @@ class AuthRepository {
     required String clinicName,
   }) async {
     // 1. Create Auth User
-    final userCredential = await _auth.createUserWithEmailAndPassword(
+    final user = await _account.create(
+      userId: ID.unique(),
       email: email,
       password: password,
+      name: name,
     );
-
-    final uid = userCredential.user!.uid;
+    final uid = user.$id;
 
     // 2. Generate unique Clinic Code
     final clinicCode = _generateRandomCode(6);
 
     // 3. Create Clinic Document with 60-day Trial
     final trialEndDate = DateTime.now().add(const Duration(days: 60));
-    final clinicRef = await _firestore.collection('clinics').add({
-      'name': clinicName,
-      'clinicCode': clinicCode,
-      'createdAt': FieldValue.serverTimestamp(),
-      'subscriptionEndDate': Timestamp.fromDate(trialEndDate),
-      'isTrial': true,
-    });
+    final clinicDoc = await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: ID.unique(),
+      data: {
+        'name': clinicName,
+        'clinicCode': clinicCode,
+        'adminId': uid,
+        'createdAt': DateTime.now().toIso8601String(),
+        'subscriptionEndDate': trialEndDate.toIso8601String(),
+        'isTrial': true,
+      },
+    );
 
     // 4. Create User Document with Admin role
-    final user = AppUser(
+    final appUser = AppUser(
       id: uid,
       name: name,
       email: email,
       phone: phone,
-      clinicId: clinicRef.id,
+      clinicId: clinicDoc.$id,
       role: 'admin',
       isApproved: true,
     );
 
-    await _firestore.collection('users').doc(uid).set(user.toMap());
+    await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'users',
+      documentId: uid,
+      data: appUser.toMap(),
+    );
 
     // 5. Create Membership record for this clinic
-    await ensureAdminMembership(uid, clinicRef.id);
+    try {
+      await ensureAdminMembership(uid, clinicDoc.$id);
+    } catch (e) {
+      debugPrint('⚠️ [SignUp] Membership step failed (non-fatal): $e');
+    }
+
+    // Automatically log in newly signed up user
+    await login(email, password);
   }
 
   // Join Existing Clinic via Code (Secretary)
@@ -109,69 +173,91 @@ class AuthRepository {
     required String password,
     required String clinicCode,
   }) async {
-    // 1. Verify Clinic Code exists before creating user
-    final clinicsQuery = await _firestore
-        .collection('clinics')
-        .where('clinicCode', isEqualTo: clinicCode)
-        .limit(1)
-        .get();
+    // 1. Verify Clinic Code exists
+    final clinicsQuery = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      queries: [Query.equal('clinicCode', clinicCode), Query.limit(1)],
+    );
 
-    if (clinicsQuery.docs.isEmpty) {
+    if (clinicsQuery.documents.isEmpty) {
       throw Exception('invalid_clinic_code');
     }
 
-    final clinicId = clinicsQuery.docs.first.id;
+    final clinicId = clinicsQuery.documents.first.$id;
 
     // 2. Create Auth User
-    final userCredential = await _auth.createUserWithEmailAndPassword(
+    final user = await _account.create(
+      userId: ID.unique(),
       email: email,
       password: password,
+      name: name,
     );
-    final uid = userCredential.user!.uid;
+    final uid = user.$id;
 
     // 3. Create User Document with Secretary role
-    final user = AppUser(
+    final appUser = AppUser(
       id: uid,
       name: name,
       email: email,
       phone: phone,
       clinicId: clinicId,
-      role: 'secretary', // Default to secretary for joiners
+      role: 'secretary',
       isApproved: false,
     );
 
-    await _firestore.collection('users').doc(uid).set(user.toMap());
+    await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'users',
+      documentId: uid,
+      data: appUser.toMap(),
+    );
 
-    // 4. Create Pending Membership record for this clinic
-    await _firestore.collection('memberships').add({
-      'userId': uid,
-      'clinicId': clinicId,
-      'role': 'secretary',
-      'status': 'pending',
-      'joinedAt': FieldValue.serverTimestamp(),
-    });
+    // 4. Create Pending Membership record
+    await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      documentId: ID.unique(),
+      data: {
+        'userId': uid,
+        'clinicId': clinicId,
+        'role': 'secretary',
+        'status': 'pending',
+        'joinedAt': DateTime.now().toIso8601String(),
+      },
+    );
+
+    await login(email, password);
   }
 
   // --- Admin Approval Actions ---
 
   Future<void> approveUser(String uid) async {
-    await _firestore.collection('users').doc(uid).update({'isApproved': true});
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'users',
+      documentId: uid,
+      data: {'isApproved': true},
+    );
   }
 
   Future<void> rejectUser(String uid) async {
-    // We delete the user document.
-    // Note: This doesn't delete the Firebase Auth account,
-    // but without a document, they will be effectively blocked or forced to re-register
-    // depending on how we handle null getUserData.
-    await _firestore.collection('users').doc(uid).delete();
+    await _databases.deleteDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'users',
+      documentId: uid,
+    );
   }
 
   // --- Clinic Management ---
 
   Future<void> updateClinicCode(String clinicId, String newCode) async {
-    await _firestore.collection('clinics').doc(clinicId).update({
-      'clinicCode': newCode,
-    });
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinicId,
+      data: {'clinicCode': newCode},
+    );
   }
 
   String generateRandomCode(int length) {
@@ -189,28 +275,37 @@ class AuthRepository {
 
   // ─── Groups / Multi-Clinic Membership System ───────────────────────────────
 
-  /// Returns all memberships for [userId], enriched with clinic name.
   Future<List<ClinicMembership>> getUserMemberships(String userId) async {
-    final snap = await _firestore
-        .collection('memberships')
-        .where('userId', isEqualTo: userId)
-        .get();
+    final snap = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      queries: [Query.equal('userId', userId)],
+    );
 
-    final memberships = snap.docs
-        .map((d) => ClinicMembership.fromMap(d.data(), d.id))
+    final memberships = snap.documents
+        .map((d) => ClinicMembership.fromMap(d.data, d.$id))
         .toList();
 
     // Enrich with clinic names
     if (memberships.isNotEmpty) {
       final clinicIds = memberships.map((m) => m.clinicId).toSet().toList();
-      final clinicsSnap = await _firestore
-          .collection('clinics')
-          .where(FieldPath.documentId, whereIn: clinicIds)
-          .get();
 
-      final nameMap = <String, String>{
-        for (var d in clinicsSnap.docs) d.id: d.data()['name'] ?? '',
-      };
+      final Map<String, String> nameMap = {};
+
+      // Unfortunately Appwrite limit in queries array values varies. A safer approach is to fetch all matching clinics or process them.
+      // If clinicIds is less than 100, we can use Query.equal.
+      if (clinicIds.isNotEmpty) {
+        final clinicsSnap = await _databases.listDocuments(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'clinics',
+          queries: [
+            Query.equal('\$id', clinicIds), // Search by document ID
+          ],
+        );
+        for (var d in clinicsSnap.documents) {
+          nameMap[d.$id] = d.data['name'] ?? '';
+        }
+      }
 
       return memberships
           .map(
@@ -229,22 +324,23 @@ class AuthRepository {
     return memberships;
   }
 
-  /// Switches the active clinic for [userId] to [clinicId].
-  /// Fetches role from the membership document and updates the user doc.
   Future<void> switchClinic(String userId, String clinicId) async {
     // 1. Get membership to retrieve role & status
-    final memberSnap = await _firestore
-        .collection('memberships')
-        .where('userId', isEqualTo: userId)
-        .where('clinicId', isEqualTo: clinicId)
-        .limit(1)
-        .get();
+    final memberSnap = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      queries: [
+        Query.equal('userId', userId),
+        Query.equal('clinicId', clinicId),
+        Query.limit(1),
+      ],
+    );
 
-    if (memberSnap.docs.isEmpty) {
+    if (memberSnap.documents.isEmpty) {
       throw Exception('no_membership_found');
     }
 
-    final memberData = memberSnap.docs.first.data();
+    final memberData = memberSnap.documents.first.data;
     final status = memberData['status'] ?? 'approved';
     if (status == 'pending') {
       throw Exception('group_pending_admin_approval');
@@ -253,57 +349,69 @@ class AuthRepository {
     final role = memberData['role'] ?? 'secretary';
 
     // 2. Update user document
-    await _firestore.collection('users').doc(userId).update({
-      'clinicId': clinicId,
-      'role': role,
-      'isApproved': true,
-    });
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'users',
+      documentId: userId,
+      data: {'clinicId': clinicId, 'role': role, 'isApproved': true},
+    );
   }
 
-  /// Joins a new clinic by [clinicCode] — creates a pending membership.
-  /// Throws if code is invalid or user is already a member.
   Future<void> joinClinicByCode(String userId, String clinicCode) async {
     // 1. Find clinic by code
-    final clinicsQuery = await _firestore
-        .collection('clinics')
-        .where('clinicCode', isEqualTo: clinicCode.toUpperCase())
-        .limit(1)
-        .get();
+    final clinicsQuery = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      queries: [
+        Query.equal('clinicCode', clinicCode.toUpperCase()),
+        Query.limit(1),
+      ],
+    );
 
-    if (clinicsQuery.docs.isEmpty) {
+    if (clinicsQuery.documents.isEmpty) {
       throw Exception('invalid_clinic_code');
     }
 
-    final clinicId = clinicsQuery.docs.first.id;
+    final clinicId = clinicsQuery.documents.first.$id;
 
     // 2. Check if already a member
-    final existing = await _firestore
-        .collection('memberships')
-        .where('userId', isEqualTo: userId)
-        .where('clinicId', isEqualTo: clinicId)
-        .limit(1)
-        .get();
+    final existing = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      queries: [
+        Query.equal('userId', userId),
+        Query.equal('clinicId', clinicId),
+        Query.limit(1),
+      ],
+    );
 
-    if (existing.docs.isNotEmpty) {
+    if (existing.documents.isNotEmpty) {
       throw Exception('already_member_or_pending');
     }
 
     // 3. Create pending membership
-    await _firestore.collection('memberships').add({
-      'userId': userId,
-      'clinicId': clinicId,
-      'role': 'secretary',
-      'status': 'pending',
-      'joinedAt': FieldValue.serverTimestamp(),
-    });
+    await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      documentId: ID.unique(),
+      data: {
+        'userId': userId,
+        'clinicId': clinicId,
+        'role': 'secretary',
+        'status': 'pending',
+        'joinedAt': DateTime.now().toIso8601String(),
+      },
+    );
   }
 
-  /// Removes a membership document (leave a clinic).
   Future<void> leaveMembership(String membershipId) async {
-    await _firestore.collection('memberships').doc(membershipId).delete();
+    await _databases.deleteDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      documentId: membershipId,
+    );
   }
 
-  /// Creates a new clinic for an existing user and sets it as active.
   Future<void> createClinicForExistingUser({
     required String userId,
     required String clinicName,
@@ -313,75 +421,105 @@ class AuthRepository {
 
     // 2. Create Clinic Document with 60-day Trial
     final trialEndDate = DateTime.now().add(const Duration(days: 60));
-    final clinicRef = await _firestore.collection('clinics').add({
-      'name': clinicName,
-      'clinicCode': clinicCode,
-      'createdAt': FieldValue.serverTimestamp(),
-      'subscriptionEndDate': Timestamp.fromDate(trialEndDate),
-      'isTrial': true,
-    });
+    final clinicDoc = await _databases.createDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: ID.unique(),
+      data: {
+        'name': clinicName,
+        'clinicCode': clinicCode,
+        'adminId': userId,
+        'createdAt': DateTime.now().toIso8601String(),
+        'subscriptionEndDate': trialEndDate.toIso8601String(),
+        'isTrial': true,
+      },
+    );
 
     // 3. Create Membership record for this clinic as Admin
-    await ensureAdminMembership(userId, clinicRef.id);
+    await ensureAdminMembership(userId, clinicDoc.$id);
 
     // 4. Update User Document to set this as the active clinic
-    await _firestore.collection('users').doc(userId).update({
-      'clinicId': clinicRef.id,
-      'role': 'admin',
-      'isApproved': true,
-    });
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'users',
+      documentId: userId,
+      data: {'clinicId': clinicDoc.$id, 'role': 'admin', 'isApproved': true},
+    );
   }
 
-  /// Creates an admin membership document. Called after signUpAsAdmin.
   Future<void> ensureAdminMembership(String userId, String clinicId) async {
-    final existing = await _firestore
-        .collection('memberships')
-        .where('userId', isEqualTo: userId)
-        .where('clinicId', isEqualTo: clinicId)
-        .limit(1)
-        .get();
+    final existing = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      queries: [
+        Query.equal('userId', userId),
+        Query.equal('clinicId', clinicId),
+        Query.limit(1),
+      ],
+    );
 
-    if (existing.docs.isEmpty) {
-      await _firestore.collection('memberships').add({
-        'userId': userId,
-        'clinicId': clinicId,
-        'role': 'admin',
-        'status': 'approved',
-        'joinedAt': FieldValue.serverTimestamp(),
-      });
+    if (existing.documents.isEmpty) {
+      await _databases.createDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'memberships',
+        documentId: ID.unique(),
+        data: {
+          'userId': userId,
+          'clinicId': clinicId,
+          'role': 'admin',
+          'status': 'approved',
+          'joinedAt': DateTime.now().toIso8601String(),
+        },
+      );
     }
   }
 
-  /// Self-healing: Ensures that the user has a membership record for their primary clinicId.
-  /// Used to fix data gaps during login or membership loading.
   Future<void> selfHealMembership(String userId, String primaryClinicId) async {
     if (primaryClinicId.isEmpty) return;
 
-    final existing = await _firestore
-        .collection('memberships')
-        .where('userId', isEqualTo: userId)
-        .where('clinicId', isEqualTo: primaryClinicId)
-        .limit(1)
-        .get();
+    final existing = await _databases.listDocuments(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'memberships',
+      queries: [
+        Query.equal('userId', userId),
+        Query.equal('clinicId', primaryClinicId),
+        Query.limit(1),
+      ],
+    );
 
-    if (existing.docs.isEmpty) {
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-      final role = userDoc.data()?['role'] ?? 'secretary';
+    if (existing.documents.isEmpty) {
+      try {
+        final userDoc = await _databases.getDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'users',
+          documentId: userId,
+        );
+        final role = userDoc.data['role'] ?? 'secretary';
 
-      await _firestore.collection('memberships').add({
-        'userId': userId,
-        'clinicId': primaryClinicId,
-        'role': role,
-        'status': 'approved',
-        'joinedAt': FieldValue.serverTimestamp(),
-      });
+        await _databases.createDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'memberships',
+          documentId: ID.unique(),
+          data: {
+            'userId': userId,
+            'clinicId': primaryClinicId,
+            'role': role,
+            'status': 'approved',
+            'joinedAt': DateTime.now().toIso8601String(),
+          },
+        );
+      } catch (e) {
+        // Ignore
+      }
     }
   }
 
   Future<void> updateClinic(ClinicGroup clinic) async {
-    await _firestore
-        .collection('clinics')
-        .doc(clinic.id)
-        .update(clinic.toMap());
+    await _databases.updateDocument(
+      databaseId: appwriteDatabaseId,
+      collectionId: 'clinics',
+      documentId: clinic.id,
+      data: clinic.toMap(),
+    );
   }
 }

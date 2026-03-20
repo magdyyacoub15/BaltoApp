@@ -269,7 +269,7 @@ class AccountScreen extends ConsumerWidget {
                           ),
 
                           // Admin Management Button
-                          if (ref.watch(isAdminProvider))
+                          if (ref.watch(isAdminProvider).value ?? false)
                             Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 24.0,
@@ -307,7 +307,7 @@ class AccountScreen extends ConsumerWidget {
                             ),
 
                           // Clinic Prescription Settings Button
-                          if (ref.watch(isAdminProvider))
+                          if (ref.watch(isAdminProvider).value ?? false)
                             Padding(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 24.0,

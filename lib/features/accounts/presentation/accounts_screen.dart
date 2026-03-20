@@ -285,7 +285,9 @@ class AccountsScreen extends ConsumerWidget {
             return;
           }
 
-          await ref.read(transactionRepositoryProvider).deleteTransaction(t.id);
+          await ref
+              .read(transactionRepositoryProvider)
+              .deleteTransaction(t.id, clinic.id);
         },
       ),
     );

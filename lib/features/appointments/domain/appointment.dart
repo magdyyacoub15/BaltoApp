@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../patients/domain/patient.dart';
 
 class Appointment {
@@ -36,7 +35,9 @@ class Appointment {
       id: id,
       patientId: data['patientId'] ?? '',
       patient: patient,
-      date: (data['date'] as Timestamp).toDate(),
+      date: data['date'] != null
+          ? DateTime.tryParse(data['date'].toString()) ?? DateTime.now()
+          : DateTime.now(),
       type: data['type'] ?? '',
       clinicId: data['clinicId'] ?? '',
       isWaiting: data['isWaiting'] ?? false,
@@ -49,7 +50,7 @@ class Appointment {
   Map<String, dynamic> toMap() {
     return {
       'patientId': patientId,
-      'date': Timestamp.fromDate(date),
+      'date': date.toIso8601String(),
       'type': type,
       'clinicId': clinicId,
       'isWaiting': isWaiting,

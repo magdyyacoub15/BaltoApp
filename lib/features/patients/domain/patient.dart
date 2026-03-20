@@ -1,6 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'models/medical_record.dart';
 import 'models/prescription.dart';
+import 'dart:convert';
 
 class Patient {
   final String id;
@@ -51,7 +51,7 @@ class Patient {
     // Migration: handle old 'age' field if 'dateOfBirth' is missing
     DateTime dob;
     if (data['dateOfBirth'] != null) {
-      dob = (data['dateOfBirth'] as Timestamp).toDate();
+      dob = DateTime.tryParse(data['dateOfBirth'].toString()) ?? DateTime.now();
     } else {
       // Approximate DOB from age if missing
       final age = data['age'] ?? 0;
@@ -67,15 +67,25 @@ class Patient {
       medicalHistory: data['medicalHistory'] ?? '',
       chronicDiseases: data['chronicDiseases'] ?? '',
       address: data['address'] ?? '',
-      lastVisit: (data['lastVisit'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      lastVisit: data['lastVisit'] != null
+          ? DateTime.tryParse(data['lastVisit'].toString()) ?? DateTime.now()
+          : DateTime.now(),
       records:
           (data['records'] as List<dynamic>?)
-              ?.map((e) => MedicalRecord.fromMap(e as Map<String, dynamic>))
+              ?.map(
+                (e) => MedicalRecord.fromMap(
+                  e is String ? json.decode(e) : e as Map<String, dynamic>,
+                ),
+              )
               .toList() ??
           const [],
       prescriptions:
           (data['prescriptions'] as List<dynamic>?)
-              ?.map((e) => Prescription.fromMap(e as Map<String, dynamic>))
+              ?.map(
+                (e) => Prescription.fromMap(
+                  e is String ? json.decode(e) : e as Map<String, dynamic>,
+                ),
+              )
               .toList() ??
           const [],
       diagnosis: data['diagnosis'] ?? '',
@@ -89,14 +99,16 @@ class Patient {
     return {
       'name': name,
       'phone': phone,
-      'dateOfBirth': Timestamp.fromDate(dateOfBirth),
+      'dateOfBirth': dateOfBirth.toIso8601String(),
       'clinicId': clinicId,
       'medicalHistory': medicalHistory,
       'chronicDiseases': chronicDiseases,
       'address': address,
-      'lastVisit': Timestamp.fromDate(lastVisit),
-      'records': records.map((e) => e.toMap()).toList(),
-      'prescriptions': prescriptions.map((e) => e.toMap()).toList(),
+      'lastVisit': lastVisit.toIso8601String(),
+      'records': records.map((e) => json.encode(e.toMap())).toList(),
+      'prescriptions': prescriptions
+          .map((e) => json.encode(e.toMap()))
+          .toList(),
       'diagnosis': diagnosis,
       'paidAmount': paidAmount,
       'remainingAmount': remainingAmount,

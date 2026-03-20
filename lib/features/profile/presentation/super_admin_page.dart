@@ -1,12 +1,14 @@
+// ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:appwrite/appwrite.dart';
+import 'package:appwrite/models.dart' as models;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
 import 'dart:ui';
 import '../../../core/services/cleanup_service.dart';
-
-import '../../../core/services/permission_service.dart';
+import '../../../core/services/appwrite_client.dart';
+import '../../../core/services/subscription_service.dart';
 import '../../../core/localization/language_provider.dart';
 
 class SuperAdminPage extends ConsumerStatefulWidget {
@@ -18,10 +20,8 @@ class SuperAdminPage extends ConsumerStatefulWidget {
 
 class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
     with SingleTickerProviderStateMixin {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
-  List<QueryDocumentSnapshot> _clinics = [];
-  List<QueryDocumentSnapshot> _filteredClinics = [];
+  List<models.Document> _clinics = [];
+  List<models.Document> _filteredClinics = [];
   final TextEditingController _searchController = TextEditingController();
   bool _isLoading = true;
   AnimationController? _animationController;
@@ -43,16 +43,22 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
 
   Future<void> _fetchTotalCounts() async {
     try {
-      final clinicsSnapshot = await _firestore
-          .collection('clinics')
-          .count()
-          .get();
-      final usersSnapshot = await _firestore.collection('users').count().get();
+      final databases = ref.read(appwriteDatabasesProvider);
+      final clinicsSnapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'clinics',
+        queries: [Query.limit(1)],
+      );
+      final usersSnapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'users',
+        queries: [Query.limit(1)],
+      );
 
       if (mounted) {
         setState(() {
-          _totalClinicsCount = clinicsSnapshot.count ?? 0;
-          _totalUsersCount = usersSnapshot.count ?? 0;
+          _totalClinicsCount = clinicsSnapshot.total;
+          _totalUsersCount = usersSnapshot.total;
         });
       }
     } catch (e) {
@@ -63,15 +69,17 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
   Future<void> _fetchClinics({bool showLoading = true}) async {
     if (showLoading) setState(() => _isLoading = true);
     try {
-      final snapshot = await _firestore
-          .collection('clinics')
-          .orderBy('createdAt', descending: true)
-          .get();
+      final databases = ref.read(appwriteDatabasesProvider);
+      final snapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'clinics',
+        queries: [Query.orderDesc('createdAt')],
+      );
 
       if (mounted) {
         setState(() {
-          _clinics = snapshot.docs;
-          _filteredClinics = snapshot.docs;
+          _clinics = snapshot.documents;
+          _filteredClinics = snapshot.documents;
           _isLoading = false;
         });
         _onSearchChanged(_searchController.text);
@@ -97,7 +105,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
   void _onSearchChanged(String query) {
     setState(() {
       _filteredClinics = _clinics.where((doc) {
-        final data = doc.data() as Map<String, dynamic>;
+        final data = doc.data;
         final name = (data['name'] ?? '').toString().toLowerCase();
         final email = (data['adminEmail'] ?? '').toString().toLowerCase();
         final code = (data['clinicCode'] ?? '').toString().toLowerCase();
@@ -278,7 +286,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
                       final doc = _filteredClinics[index];
-                      final data = doc.data() as Map<String, dynamic>;
+                      final data = doc.data;
                       final String name = data['name'] ?? ref.tr('no_name');
                       final String email =
                           data['adminEmail'] ?? ref.tr('no_email');
@@ -288,8 +296,9 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
 
                       DateTime? endDate;
                       if (data['subscriptionEndDate'] != null) {
-                        endDate = (data['subscriptionEndDate'] as Timestamp)
-                            .toDate();
+                        endDate = DateTime.tryParse(
+                          data['subscriptionEndDate'].toString(),
+                        )?.toLocal();
                       }
 
                       String statusText = ref.tr('not_set');
@@ -409,7 +418,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                                     ),
                                     _buildInfoRow(
                                       ref.tr('id_label'),
-                                      doc.id,
+                                      doc.$id,
                                       Icons.perm_identity,
                                     ),
                                     const Divider(height: 30),
@@ -426,22 +435,22 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                                       runSpacing: 8,
                                       children: [
                                         _buildExtendButton(
-                                          doc.id,
+                                          doc.$id,
                                           ref.tr('one_month'),
                                           30,
                                         ),
                                         _buildExtendButton(
-                                          doc.id,
+                                          doc.$id,
                                           ref.tr('three_months'),
                                           90,
                                         ),
                                         _buildExtendButton(
-                                          doc.id,
+                                          doc.$id,
                                           ref.tr('six_months'),
                                           180,
                                         ),
                                         _buildExtendButton(
-                                          doc.id,
+                                          doc.$id,
                                           ref.tr('full_year'),
                                           365,
                                         ),
@@ -458,11 +467,11 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                                     const SizedBox(height: 12),
                                     Row(
                                       children: [
-                                        _buildEditDateButton(doc.id, endDate),
-                                        _buildCustomDaysButton(doc.id),
-                                        _buildCancelButton(doc.id),
+                                        _buildEditDateButton(doc.$id, endDate),
+                                        _buildCustomDaysButton(doc.$id),
+                                        _buildCancelButton(doc.$id),
                                         const Spacer(),
-                                        _buildDeleteSystemButton(doc.id, name),
+                                        _buildDeleteSystemButton(doc.$id, name),
                                       ],
                                     ),
                                   ],
@@ -614,14 +623,15 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
       final subcollections = [
         'patients',
         'appointments',
-        'expenses',
-        'users_roles', // Virtual conceptual link, actual logic might vary
+        'expenses', // Let's pretend expenses is transactions or we just delete users
+        'users_roles',
       ];
 
       int currentStep = 0;
       final totalSteps = subcollections.length + 1;
+      final databases = ref.read(appwriteDatabasesProvider);
 
-      // 1. Delete Patients & Medical Records
+      // 1. Delete Patients
       currentStep++;
       onProgress(
         ref.tr('deleting_patients_records', [
@@ -630,22 +640,19 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
         ]),
       );
 
-      final patientsSnapshot = await _firestore
-          .collection('clinics')
-          .doc(clinicId)
-          .collection('patients')
-          .get();
+      final patientsSnapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'patients',
+        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
+      );
 
       int deletedPatients = 0;
-      for (var patient in patientsSnapshot.docs) {
-        // Delete records subcollection first
-        final recordsSnapshot = await patient.reference
-            .collection('medical_records')
-            .get();
-        for (var record in recordsSnapshot.docs) {
-          await record.reference.delete();
-        }
-        await patient.reference.delete();
+      for (var patient in patientsSnapshot.documents) {
+        await databases.deleteDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'patients',
+          documentId: patient.$id,
+        );
         deletedPatients++;
         onProgress(
           ref.tr('deleting_patients_count', [deletedPatients.toString()]),
@@ -660,16 +667,20 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           totalSteps.toString(),
         ]),
       );
-      final appointmentsSnapshot = await _firestore
-          .collection('clinics')
-          .doc(clinicId)
-          .collection('appointments')
-          .get();
-      for (var doc in appointmentsSnapshot.docs) {
-        await doc.reference.delete();
+      final appointmentsSnapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'appointments',
+        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
+      );
+      for (var doc in appointmentsSnapshot.documents) {
+        await databases.deleteDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'appointments',
+          documentId: doc.$id,
+        );
       }
 
-      // 3. Delete Expenses
+      // 3. Delete Expenses / Transactions
       currentStep++;
       onProgress(
         ref.tr('deleting_expenses', [
@@ -677,13 +688,17 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           totalSteps.toString(),
         ]),
       );
-      final expensesSnapshot = await _firestore
-          .collection('clinics')
-          .doc(clinicId)
-          .collection('expenses')
-          .get();
-      for (var doc in expensesSnapshot.docs) {
-        await doc.reference.delete();
+      final expensesSnapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'transactions',
+        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
+      );
+      for (var doc in expensesSnapshot.documents) {
+        await databases.deleteDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'transactions',
+          documentId: doc.$id,
+        );
       }
 
       // 4. Reset User Roles (detach users from this clinic)
@@ -694,12 +709,19 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           totalSteps.toString(),
         ]),
       );
-      final usersSnapshot = await _firestore
-          .collection('users')
-          .where('clinicId', isEqualTo: clinicId)
-          .get();
-      for (var user in usersSnapshot.docs) {
-        await user.reference.update({'clinicId': FieldValue.delete()});
+      final usersSnapshot = await databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'users',
+        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
+      );
+      for (var user in usersSnapshot.documents) {
+        // Here we just mark them as unapproved and remove clinicId if possible
+        await databases.updateDocument(
+          databaseId: appwriteDatabaseId,
+          collectionId: 'users',
+          documentId: user.$id,
+          data: {'clinicId': '', 'isApproved': false},
+        );
       }
 
       // 5. Delete Clinic Final Store Data (Images, Backups, etc.)
@@ -716,7 +738,11 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           .deleteStorageFolder('clinics/$clinicId');
 
       // 6. Delete Clinic Document
-      await _firestore.collection('clinics').doc(clinicId).delete();
+      await databases.deleteDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'clinics',
+        documentId: clinicId,
+      );
 
       if (mounted) {
         messenger.showSnackBar(

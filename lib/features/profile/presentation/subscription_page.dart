@@ -1,11 +1,13 @@
+// ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:appwrite/appwrite.dart';
+import '../../../core/services/appwrite_client.dart';
 import '../../../core/services/subscription_service.dart';
-import '../../../core/services/permission_service.dart';
+
 import '../../../core/localization/language_provider.dart';
 import '../../auth/presentation/auth_providers.dart';
 
@@ -18,8 +20,6 @@ class SubscriptionPage extends ConsumerStatefulWidget {
 
 class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
     with SingleTickerProviderStateMixin {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
   AnimationController? _animationController;
 
   SubscriptionStatus _status = SubscriptionStatus.trial;
@@ -82,12 +82,14 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
 
   Future<void> _loadPrices() async {
     try {
-      final doc = await _firestore
-          .collection('config')
-          .doc('subscription_prices')
-          .get();
-      if (doc.exists && doc.data() != null) {
-        final data = doc.data()!;
+      final databases = ref.read(appwriteDatabasesProvider);
+      final doc = await databases.getDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'config',
+        documentId: 'subscription_prices',
+      );
+      if (doc.data.isNotEmpty) {
+        final data = doc.data;
         if (mounted) {
           setState(() {
             _price1m = data['price_1m'] ?? _price1m;
@@ -96,6 +98,13 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
             _price1y = data['price_1y'] ?? _price1y;
           });
         }
+      }
+    } on AppwriteException catch (e) {
+      if (e.code == 404) {
+        // It's ok if the config document doesn't exist yet
+        debugPrint("Price config doc not found.");
+      } else {
+        debugPrint("Error loading prices from appwrite: $e");
       }
     } catch (e) {
       debugPrint("Error loading prices: $e");
@@ -144,10 +153,27 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
                   };
 
                   try {
-                    await _firestore
-                        .collection('config')
-                        .doc('subscription_prices')
-                        .set(data, SetOptions(merge: true));
+                    final databases = ref.read(appwriteDatabasesProvider);
+                    try {
+                      await databases.updateDocument(
+                        databaseId: appwriteDatabaseId,
+                        collectionId: 'config',
+                        documentId: 'subscription_prices',
+                        data: data,
+                      );
+                    } on AppwriteException catch (e) {
+                      if (e.code == 404) {
+                        await databases.createDocument(
+                          databaseId: appwriteDatabaseId,
+                          collectionId: 'config',
+                          documentId: 'subscription_prices',
+                          data: data,
+                        );
+                      } else {
+                        rethrow;
+                      }
+                    }
+
                     if (context.mounted) {
                       setState(() {
                         _price1m = p1m.text;
