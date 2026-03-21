@@ -10,7 +10,10 @@ import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/localization/language_provider.dart';
 import '../../accounts/domain/transaction.dart';
 import '../../accounts/data/transaction_repository.dart';
+import '../../accounts/domain/accounts_provider.dart';
 import '../domain/models/medical_record.dart';
+import '../domain/patients_provider.dart';
+import '../../appointments/domain/appointments_provider.dart';
 
 class AddPatientScreen extends ConsumerStatefulWidget {
   final Patient? patient;
@@ -106,22 +109,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
                   _addressController.text == previousMatch.address)) {
             _addressController.text = match.address;
           }
-          if (_paidController.text.isEmpty ||
-              (previousMatch != null &&
-                  _paidController.text ==
-                      previousMatch.paidAmount.toString())) {
-            _paidController.text = match.paidAmount > 0
-                ? match.paidAmount.toString()
-                : '';
-          }
-          if (_remainingController.text.isEmpty ||
-              (previousMatch != null &&
-                  _remainingController.text ==
-                      previousMatch.remainingAmount.toString())) {
-            _remainingController.text = match.remainingAmount > 0
-                ? match.remainingAmount.toString()
-                : '';
-          }
+          // Do NOT auto-fill paid/remaining — they belong to past visits, not this new one.
         } else if (previousMatch != null) {
           if (_phoneController.text == previousMatch.phone) {
             _phoneController.text = '';
@@ -133,19 +121,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             _addressController.text = '';
           }
 
-          final String prevPaidStr = previousMatch.paidAmount > 0
-              ? previousMatch.paidAmount.toString()
-              : '';
-          if (_paidController.text == prevPaidStr) {
-            _paidController.text = '';
-          }
-
-          final String prevRemStr = previousMatch.remainingAmount > 0
-              ? previousMatch.remainingAmount.toString()
-              : '';
-          if (_remainingController.text == prevRemStr) {
-            _remainingController.text = '';
-          }
+          // paid/remaining were never set from patient match, nothing to clear here.
         }
       });
     }
@@ -198,6 +174,8 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
       final double remaining =
           double.tryParse(_remainingController.text) ?? 0.0;
 
+      String newApptId = '';
+
       if (widget.patient == null && _matchedPatient == null) {
         // Adding brand new patient
         patientToSave = Patient(
@@ -216,7 +194,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
 
         // Add Appointment
         final apptRepo = ref.read(appointmentRepositoryProvider);
-        await apptRepo.addAppointment(
+        newApptId = await apptRepo.addAppointment(
           Appointment(
             id: '',
             patientId: patientId,
@@ -240,9 +218,38 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             remainingAmount: remaining,
           ),
         );
+      } else if (widget.patient != null) {
+        // ── Pure edit: patient already has an appointment in queue ──
+        // Update contact info AND financial amounts. Do NOT create a new
+        // appointment or a new medical record — that would duplicate the queue.
+        patientToSave = widget.patient!.copyWith(
+          name: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          dateOfBirth: _dateOfBirth!,
+          address: _addressController.text.trim(),
+          paidAmount: widget.patient!.paidAmount + paid,
+          remainingAmount: remaining,
+        );
+        await repo.updatePatient(patientToSave);
+
+        // Create a financial transaction only if payment was actually added
+        if (paid > 0) {
+          final transactionRepo = ref.read(transactionRepositoryProvider);
+          await transactionRepo.addTransaction(
+            AppTransaction(
+              id: '',
+              amount: paid,
+              description: ref.tr('examine_patient', [patientToSave.name]),
+              type: TransactionType.revenue,
+              date: DateTime.now(),
+              clinicId: user.clinicId,
+            ),
+          );
+        }
+        // (prevPaid was removed — no longer needed)
       } else {
-        // Editing existing patient or using smart-detected one
-        final targetPatient = widget.patient ?? _matchedPatient!;
+        // ── New visit for a recognised (matched) existing patient ──
+        final targetPatient = _matchedPatient!;
         patientId = targetPatient.id;
 
         patientToSave = targetPatient.copyWith(
@@ -250,16 +257,14 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
           phone: _phoneController.text.trim(),
           dateOfBirth: _dateOfBirth!,
           address: _addressController.text.trim(),
-          paidAmount: (widget.patient != null)
-              ? paid
-              : (targetPatient.paidAmount + paid),
+          paidAmount: targetPatient.paidAmount + paid,
           remainingAmount: remaining,
         );
         await repo.updatePatient(patientToSave);
 
         // Add Appointment for current session
         final apptRepo = ref.read(appointmentRepositoryProvider);
-        await apptRepo.addAppointment(
+        newApptId = await apptRepo.addAppointment(
           Appointment(
             id: '',
             patientId: patientId,
@@ -308,9 +313,15 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             type: TransactionType.revenue,
             date: DateTime.now(),
             clinicId: user.clinicId,
+            appointmentId: newApptId.isNotEmpty ? newApptId : null,
           ),
         );
       }
+
+      // Optimistic Update: Force UI refresh immediately for the current user
+      ref.invalidate(patientsStreamProvider);
+      ref.invalidate(appointmentsStreamProvider);
+      ref.invalidate(transactionsStreamProvider);
 
       if (mounted) {
         ScaffoldMessenger.of(

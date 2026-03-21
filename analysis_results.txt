@@ -1,0 +1,12 @@
+Analyzing 5 items...                                            
+
+  error - The function 'StateProvider' isn't defined - lib\core\services\appwrite_client.dart:31:34 - undefined_function
+warning - A value of type 'List<Appointment>' can't be returned by the 'onError' handler because it must be assignable to 'FutureOr<void>' - lib\features\appointments\data\appointment_repository.dart:55:14 - invalid_return_type_for_catch_error
+   info - 'listDocuments' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.listRows` instead - lib\features\appointments\data\appointment_repository.dart:76:36 - deprecated_member_use
+   info - 'createDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.createRow` instead - lib\features\appointments\data\appointment_repository.dart:158:12 - deprecated_member_use
+   info - 'updateDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.updateRow` instead - lib\features\appointments\data\appointment_repository.dart:197:12 - deprecated_member_use
+   info - 'updateDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.updateRow` instead - lib\features\appointments\data\appointment_repository.dart:227:20 - deprecated_member_use
+   info - 'deleteDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.deleteRow` instead - lib\features\appointments\data\appointment_repository.dart:252:22 - deprecated_member_use
+warning - A value of type 'List<Patient>' can't be returned by the 'onError' handler because it must be assignable to 'FutureOr<void>' - lib\features\patients\data\patient_repository.dart:63:16 - invalid_return_type_for_catch_error
+
+8 issues found. (ran in 1.4s)

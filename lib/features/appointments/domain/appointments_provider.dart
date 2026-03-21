@@ -1,5 +1,4 @@
-import 'dart:async';
-import 'package:appwrite/appwrite.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/appointment_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -7,48 +6,43 @@ import '../domain/appointment.dart';
 import '../../patients/domain/patients_provider.dart';
 import '../../../core/services/appwrite_client.dart';
 
-// ─── Appwrite Realtime Client Provider ───────────────────────────────────────
-final appwriteRealtimeProvider = Provider<Realtime>((ref) {
-  final client = ref.watch(appwriteClientProvider);
-  return Realtime(client);
-});
-
 // ─── Realtime Appointments Stream Provider (for Dashboard) ───────────────────
 // Listens to Appwrite Realtime and emits a fresh list whenever any appointment
 // document is created, updated, or deleted in the current clinic.
-final appointmentsStreamProvider = StreamProvider<List<Appointment>>((ref) {
-  final userAsync = ref.watch(authStateProvider);
-  final user = userAsync.value;
-  if (user == null) return Stream.value([]);
+final appointmentsStreamProvider = StreamProvider<List<Appointment>>((
+  ref,
+) async* {
+  final user = await ref.watch(currentUserProvider.future);
+  if (user == null) {
+    yield [];
+    return;
+  }
 
   final realtime = ref.watch(appwriteRealtimeProvider);
   final repo = ref.watch(appointmentRepositoryProvider);
-
-  // Controller to emit lists
-  final controller = StreamController<List<Appointment>>();
-
-  // Fetch current user's clinicId
-  Future<String?> getClinicId() async {
-    final appUser = await ref.read(currentUserProvider.future);
-    return appUser?.clinicId;
-  }
+  final clinicId = user.clinicId;
 
   // Initial load from cache/network
-  getClinicId().then((clinicId) async {
-    if (clinicId == null) return;
+  List<Appointment> currentList = [];
+  try {
+    final threshold = await ref.watch(clinicVisibilityThresholdProvider.future);
+    currentList = await repo.getAppointments(clinicId, startAfter: threshold);
+    yield currentList;
+  } catch (_) {}
 
-    // Emit initial data (from cache or network)
-    final threshold = await ref.read(clinicVisibilityThresholdProvider.future);
-    final all = await repo.getAppointments(clinicId, startAfter: threshold);
-    if (!controller.isClosed) controller.add(all);
+  // Subscribe to Realtime changes for this clinic's appointments
+  final subscription = realtime.subscribe([
+    'databases.$appwriteDatabaseId.collections.appointments.documents',
+  ]);
 
-    // Subscribe to Realtime changes for this clinic's appointments
-    final subscription = realtime.subscribe([
-      'databases.$appwriteDatabaseId.collections.appointments.documents',
-    ]);
+  ref.onDispose(() {
+    subscription.close();
+  });
 
-    subscription.stream.listen((_) async {
-      // Any change → refresh from cache/network
+  // Listen for real-time events and refresh from the cache/network
+  await for (final event in subscription.stream) {
+    debugPrint('REALTIME APPOINTMENT EVENT: ${event.events}');
+    try {
       final updated = await repo.refreshAppointments(clinicId);
       final t = await ref.read(clinicVisibilityThresholdProvider.future);
       final filtered = updated.where((a) {
@@ -62,24 +56,32 @@ final appointmentsStreamProvider = StreamProvider<List<Appointment>>((ref) {
         }
         return a.date.compareTo(b.date);
       });
-      if (!controller.isClosed) controller.add(filtered);
-    });
-
-    ref.onDispose(() {
-      subscription.close();
-      controller.close();
-    });
-  });
-
-  return controller.stream;
+      debugPrint('REALTIME APPOINTMENT UPDATED: ${filtered.length}');
+      yield filtered;
+    } catch (e, stack) {
+      debugPrint('REALTIME APPOINTMENT ERROR: $e');
+      debugPrint(stack.toString());
+    }
+  }
 });
 
-// ─── Enriched appointments with patient data ─────────────────────────────────
-final enrichedAppointmentsProvider = FutureProvider<List<Appointment>>((
+// --- Enriched appointments with patient data ---------------------------------
+// Reacts to every update from appointmentsStreamProvider or patientsStreamProvider.
+final enrichedAppointmentsProvider = Provider<AsyncValue<List<Appointment>>>((
   ref,
-) async {
-  final appointments = await ref.watch(appointmentsStreamProvider.future);
-  final patients = await ref.watch(patientsStreamProvider.future);
+) {
+  final appointmentsAsync = ref.watch(appointmentsStreamProvider);
+  final patientsAsync = ref.watch(patientsStreamProvider);
+
+  if (appointmentsAsync is AsyncLoading || patientsAsync is AsyncLoading) {
+    if (!appointmentsAsync.hasValue) return const AsyncLoading();
+  }
+  if (appointmentsAsync is AsyncError) {
+    return AsyncError(appointmentsAsync.error!, appointmentsAsync.stackTrace!);
+  }
+
+  final appointments = appointmentsAsync.value ?? [];
+  final patients = patientsAsync.value ?? [];
 
   final enriched = appointments.map((app) {
     final patient = patients.cast<dynamic>().firstWhere(
@@ -88,7 +90,8 @@ final enrichedAppointmentsProvider = FutureProvider<List<Appointment>>((
     );
     return app.copyWith(patient: patient);
   }).toList();
-  return enriched;
+
+  return AsyncData(enriched);
 });
 
 // ─── Stats derived from data ──────────────────────────────────────────────────

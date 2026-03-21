@@ -1,17 +1,51 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'patient.dart';
+import '../../../core/services/appwrite_client.dart';
 
-// Future provider of all patients for the current user's clinic
-final patientsStreamProvider = FutureProvider<List<Patient>>((ref) async {
+// Stream provider of all patients for the current user's clinic
+// Listens to Appwrite Realtime for instant updates when new patients are added.
+final patientsStreamProvider = StreamProvider<List<Patient>>((ref) async* {
   final user = await ref.watch(currentUserProvider.future);
-  final repo = ref.watch(patientRepositoryProvider);
-
-  if (user != null) {
-    return await repo.getPatients(user.clinicId);
+  if (user == null) {
+    yield [];
+    return;
   }
-  return [];
+
+  final realtime = ref.watch(appwriteRealtimeProvider);
+  final repo = ref.watch(patientRepositoryProvider);
+  final clinicId = user.clinicId;
+
+  // Initial load
+  List<Patient> currentList = [];
+  try {
+    currentList = await repo.getPatients(clinicId);
+    yield currentList;
+  } catch (_) {}
+
+  // Subscribe to Realtime
+  final subscription = realtime.subscribe([
+    'databases.$appwriteDatabaseId.collections.patients.documents',
+  ]);
+
+  ref.onDispose(() {
+    subscription.close();
+  });
+
+  // Listen for real-time events and refresh from the network/cache
+  await for (final event in subscription.stream) {
+    debugPrint('REALTIME PATIENT EVENT: ${event.events}');
+    try {
+      final updated = await repo.refreshPatients(clinicId);
+      debugPrint('REALTIME PATIENT UPDATED: ${updated.length}');
+      yield updated;
+    } catch (e, stack) {
+      debugPrint('REALTIME PATIENT ERROR: $e');
+      debugPrint(stack.toString());
+    }
+  }
 });
 
 // Search query notifier for filtering results locally

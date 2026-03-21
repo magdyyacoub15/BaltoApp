@@ -89,21 +89,83 @@ class TransactionRepository {
   }
 
   Future<void> addTransaction(AppTransaction transaction) async {
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'transactions',
-      documentId: ID.unique(),
-      data: transaction.toMap(),
+    final newId = ID.unique();
+    final newTransaction = AppTransaction(
+      id: newId,
+      amount: transaction.amount,
+      description: transaction.description,
+      type: transaction.type,
+      date: transaction.date,
+      clinicId: transaction.clinicId,
+      appointmentId: transaction.appointmentId,
     );
+
+    // Optimistic Cache Update
+    final cached = _cache.getCachedTransactions(transaction.clinicId) ?? [];
+    cached.add({...newTransaction.toMap(), 'id': newId});
+    _cache.cacheTransactions(transaction.clinicId, cached);
+
+    try {
+      await _databases.createDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'transactions',
+        documentId: newId,
+        data: newTransaction.toMap(),
+      );
+    } catch (_) {}
     _refreshInBackground(transaction.clinicId);
   }
 
   Future<void> deleteTransaction(String id, String clinicId) async {
-    await _databases.deleteDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'transactions',
-      documentId: id,
-    );
+    // Optimistic Cache Update
+    final cached = _cache.getCachedTransactions(clinicId) ?? [];
+    cached.removeWhere((m) => m['id'] == id);
+    _cache.cacheTransactions(clinicId, cached);
+
+    try {
+      await _databases.deleteDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'transactions',
+        documentId: id,
+      );
+    } catch (_) {}
+    _refreshInBackground(clinicId);
+  }
+
+  Future<void> deleteTransactionByAppointmentId(
+    String appointmentId,
+    String clinicId,
+  ) async {
+    // Optimistic Cache Update
+    final cached = _cache.getCachedTransactions(clinicId) ?? [];
+    cached.removeWhere((m) => m['appointmentId'] == appointmentId);
+    _cache.cacheTransactions(clinicId, cached);
+
+    // Network Request without creating index in Appwrite
+    try {
+      final res = await _databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'transactions',
+        queries: [Query.equal('clinicId', clinicId), Query.limit(500)],
+      );
+
+      final docsToDelete = res.documents
+          .where((d) => d.data['appointmentId'] == appointmentId)
+          .toList();
+
+      final futures = <Future>[];
+      for (final doc in docsToDelete) {
+        futures.add(
+          _databases.deleteDocument(
+            databaseId: appwriteDatabaseId,
+            collectionId: 'transactions',
+            documentId: doc.$id,
+          ),
+        );
+      }
+      await Future.wait(futures);
+    } catch (_) {}
+
     _refreshInBackground(clinicId);
   }
 }

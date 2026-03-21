@@ -7,6 +7,7 @@ class AppTransaction {
   final TransactionType type;
   final DateTime date;
   final String clinicId;
+  final String? appointmentId;
 
   AppTransaction({
     required this.id,
@@ -15,6 +16,7 @@ class AppTransaction {
     required this.type,
     required this.date,
     required this.clinicId,
+    this.appointmentId,
   });
 
   Map<String, dynamic> toMap() {
@@ -24,6 +26,7 @@ class AppTransaction {
       'type': type.name,
       'date': date.toIso8601String(),
       'clinicId': clinicId,
+      if (appointmentId != null) 'appointmentId': appointmentId,
     };
   }
 
@@ -37,6 +40,7 @@ class AppTransaction {
           ? DateTime.tryParse(map['date'].toString()) ?? DateTime.now()
           : DateTime.now(),
       clinicId: map['clinicId'] ?? '',
+      appointmentId: map['appointmentId'],
     );
   }
 }

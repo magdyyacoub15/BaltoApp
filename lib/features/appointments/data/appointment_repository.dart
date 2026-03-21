@@ -144,23 +144,51 @@ class AppointmentRepository {
     return upcoming;
   }
 
-  Future<void> addAppointment(Appointment appointment) async {
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'appointments',
-      documentId: ID.unique(),
-      data: appointment.toMap(),
-    );
+  Future<String> addAppointment(Appointment appointment) async {
+    final newId = ID.unique();
+    final newAppt = appointment.copyWith(id: newId);
+
+    // 1. Optimistic Cache Update
+    final cached = _cache.getCachedAppointments(appointment.clinicId) ?? [];
+    cached.add({...newAppt.toMap(), 'id': newId});
+    _cache.cacheAppointments(appointment.clinicId, cached);
+
+    // 2. Network Request
+    try {
+      await _databases.createDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'appointments',
+        documentId: newId,
+        data: newAppt.toMap(),
+      );
+    } catch (_) {
+      // Offline fallback: The background sync will eventually handle this
+    }
+
+    // 3. Keep cache in sync in the background
     _refreshAppointmentsInBackground(appointment.clinicId);
+    return newId;
   }
 
   Future<void> updateAppointment(Appointment appointment) async {
-    await _databases.updateDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'appointments',
-      documentId: appointment.id,
-      data: appointment.toMap(),
-    );
+    // 1. Optimistic Cache Update
+    final cached = _cache.getCachedAppointments(appointment.clinicId) ?? [];
+    final index = cached.indexWhere((m) => m['id'] == appointment.id);
+    if (index != -1) {
+      cached[index] = {...appointment.toMap(), 'id': appointment.id};
+      _cache.cacheAppointments(appointment.clinicId, cached);
+    }
+
+    // 2. Network Request
+    try {
+      await _databases.updateDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'appointments',
+        documentId: appointment.id,
+        data: appointment.toMap(),
+      );
+    } catch (_) {}
+
     _refreshAppointmentsInBackground(appointment.clinicId);
   }
 
@@ -183,11 +211,20 @@ class AppointmentRepository {
   }
 
   Future<void> deleteAppointment(String id, String clinicId) async {
-    await _databases.deleteDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'appointments',
-      documentId: id,
-    );
+    // 1. Optimistic Cache Update
+    final cached = _cache.getCachedAppointments(clinicId) ?? [];
+    cached.removeWhere((m) => m['id'] == id);
+    _cache.cacheAppointments(clinicId, cached);
+
+    // 2. Network Request
+    try {
+      await _databases.deleteDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'appointments',
+        documentId: id,
+      );
+    } catch (_) {}
+
     _refreshAppointmentsInBackground(clinicId);
   }
 }

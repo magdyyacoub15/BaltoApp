@@ -94,29 +94,56 @@ class PatientRepository {
   }
 
   Future<String> addPatient(Patient patient) async {
-    final docRef = await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'patients',
-      documentId: ID.unique(),
-      data: patient.toMap(),
-    );
-    // Invalidate cache so next load fetches fresh
-    await _fetchAndCachePatients(patient.clinicId);
-    return docRef.$id;
+    final newId = ID.unique();
+    final newPatient = patient.copyWith(id: newId);
+
+    // Optimistic Cache Update
+    final cached = _cache.getCachedPatients(patient.clinicId) ?? [];
+    cached.add({...newPatient.toMap(), 'id': newId});
+    _cache.cachePatients(patient.clinicId, cached);
+
+    try {
+      await _databases.createDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'patients',
+        documentId: newId,
+        data: newPatient.toMap(),
+      );
+    } catch (_) {}
+
+    // Invalidate cache so next load fetches fresh in background
+    _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
+    return newId;
   }
 
   Future<void> updatePatient(Patient patient) async {
-    await _databases.updateDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'patients',
-      documentId: patient.id,
-      data: patient.toMap(),
-    );
+    // Optimistic Cache Update
+    final cached = _cache.getCachedPatients(patient.clinicId) ?? [];
+    final index = cached.indexWhere((m) => m['id'] == patient.id);
+    if (index != -1) {
+      cached[index] = {...patient.toMap(), 'id': patient.id};
+      _cache.cachePatients(patient.clinicId, cached);
+    }
+
+    try {
+      await _databases.updateDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'patients',
+        documentId: patient.id,
+        data: patient.toMap(),
+      );
+    } catch (_) {}
+
     // Update cache in background
     _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
   }
 
   Future<void> deletePatient(Patient patient) async {
+    // Optimistic Cache Update
+    final cached = _cache.getCachedPatients(patient.clinicId) ?? [];
+    cached.removeWhere((m) => m['id'] == patient.id);
+    _cache.cachePatients(patient.clinicId, cached);
+
     for (var record in patient.records) {
       for (var url in record.attachmentUrls) {
         await _cleanupService.deleteCloudFile(url);
@@ -125,11 +152,15 @@ class PatientRepository {
     if (patient.prescriptionImageUrl != null) {
       await _cleanupService.deleteCloudFile(patient.prescriptionImageUrl);
     }
-    await _databases.deleteDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'patients',
-      documentId: patient.id,
-    );
+
+    try {
+      await _databases.deleteDocument(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'patients',
+        documentId: patient.id,
+      );
+    } catch (_) {}
+
     _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
   }
 
