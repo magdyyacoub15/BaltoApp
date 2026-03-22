@@ -108,6 +108,10 @@ class PatientRepository {
         collectionId: 'patients',
         documentId: newId,
         data: newPatient.toMap(),
+        permissions: [
+          Permission.read(Role.users()),
+          Permission.write(Role.users()),
+        ],
       );
     } catch (_) {}
 
@@ -139,11 +143,22 @@ class PatientRepository {
   }
 
   Future<void> deletePatient(Patient patient) async {
-    // Optimistic Cache Update
+    // 1. Optimistic Cache Update — remove patient, appointments, and transactions
     final cached = _cache.getCachedPatients(patient.clinicId) ?? [];
     cached.removeWhere((m) => m['id'] == patient.id);
     _cache.cachePatients(patient.clinicId, cached);
 
+    // Remove related appointments from cache
+    final cachedAppts = _cache.getCachedAppointments(patient.clinicId) ?? [];
+    cachedAppts.removeWhere((m) => m['patientId'] == patient.id);
+    _cache.cacheAppointments(patient.clinicId, cachedAppts);
+
+    // Remove related transactions from cache
+    final cachedTxns = _cache.getCachedTransactions(patient.clinicId) ?? [];
+    cachedTxns.removeWhere((m) => m['patientId'] == patient.id);
+    _cache.cacheTransactions(patient.clinicId, cachedTxns);
+
+    // 2. Delete cloud-stored files (attachments, prescription image)
     for (var record in patient.records) {
       for (var url in record.attachmentUrls) {
         await _cleanupService.deleteCloudFile(url);
@@ -153,6 +168,63 @@ class PatientRepository {
       await _cleanupService.deleteCloudFile(patient.prescriptionImageUrl);
     }
 
+    // 3. Delete related appointments from server
+    try {
+      final apptDocs = await _databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'appointments',
+        queries: [Query.equal('patientId', patient.id), Query.limit(500)],
+      );
+      final apptFutures = apptDocs.documents
+          .map(
+            (d) => _databases.deleteDocument(
+              databaseId: appwriteDatabaseId,
+              collectionId: 'appointments',
+              documentId: d.$id,
+            ),
+          )
+          .toList();
+      await Future.wait(apptFutures);
+    } catch (_) {}
+
+    // 4. Delete related transactions from server
+    // Transactions are linked by appointmentId – fetch all clinic transactions
+    // and delete those whose patientId matches (if stored) OR whose
+    // appointmentId belongs to the patient via the appointments we just deleted.
+    // Simplest reliable approach: query by clinicId and filter in-memory.
+    try {
+      final txnDocs = await _databases.listDocuments(
+        databaseId: appwriteDatabaseId,
+        collectionId: 'transactions',
+        queries: [Query.equal('clinicId', patient.clinicId), Query.limit(500)],
+      );
+      // Find transaction IDs that belong to appointments of this patient.
+      // Since transactions store appointmentId (not patientId directly),
+      // collect all appointment IDs we deleted above, then match.
+      // Refetch appointment IDs from deleted docs is not possible here,
+      // so we match by description pattern OR by appointmentId in cache.
+      // The safest approach: delete transactions where description contains
+      // the patient name AND they are recent — but that is fragile.
+      // Better: re-query appointments that still exist (none after step 3)
+      // and use the cachedAppts we already had before removal.
+      final deletedApptIds = cachedAppts
+          .map((m) => m['id']?.toString() ?? '')
+          .toSet();
+
+      final txnFutures = txnDocs.documents
+          .where((d) => deletedApptIds.contains(d.data['appointmentId'] ?? ''))
+          .map(
+            (d) => _databases.deleteDocument(
+              databaseId: appwriteDatabaseId,
+              collectionId: 'transactions',
+              documentId: d.$id,
+            ),
+          )
+          .toList();
+      await Future.wait(txnFutures);
+    } catch (_) {}
+
+    // 5. Delete the patient document itself
     try {
       await _databases.deleteDocument(
         databaseId: appwriteDatabaseId,
@@ -161,6 +233,7 @@ class PatientRepository {
       );
     } catch (_) {}
 
+    // 6. Refresh caches in background
     _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
   }
 

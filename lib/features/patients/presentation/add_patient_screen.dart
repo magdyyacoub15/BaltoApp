@@ -6,14 +6,11 @@ import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../appointments/domain/appointment.dart';
 import '../../appointments/data/appointment_repository.dart';
-import '../../../core/presentation/widgets/scaled_icon.dart';
-import '../../../core/localization/language_provider.dart';
-import '../../accounts/domain/transaction.dart';
 import '../../accounts/data/transaction_repository.dart';
-import '../../accounts/domain/accounts_provider.dart';
+import '../../accounts/domain/transaction.dart';
+import '../../../core/localization/language_provider.dart';
+import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../domain/models/medical_record.dart';
-import '../domain/patients_provider.dart';
-import '../../appointments/domain/appointments_provider.dart';
 
 class AddPatientScreen extends ConsumerStatefulWidget {
   final Patient? patient;
@@ -318,10 +315,8 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         );
       }
 
-      // Optimistic Update: Force UI refresh immediately for the current user
-      ref.invalidate(patientsStreamProvider);
-      ref.invalidate(appointmentsStreamProvider);
-      ref.invalidate(transactionsStreamProvider);
+      // Realtime subscription and polling will handle the UI update naturally
+      // without forcing a full screen loading flicker.
 
       if (mounted) {
         ScaffoldMessenger.of(
@@ -633,7 +628,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               foregroundColor: Colors.white,
             ),
             child: Text(
-              isEditing ? ref.tr('save_changes') : ref.tr('save_patient'),
+              isEditing ? ref.tr('save_changes') : ref.tr('save_patient_visit'),
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           );

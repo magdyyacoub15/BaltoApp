@@ -145,10 +145,14 @@ class AppointmentsListScreen extends ConsumerWidget {
                     title: Text(patientName),
                     subtitle: Text(
                       appt.isWaiting
-                          ? ref.tr('in_queue', [appt.type])
+                          ? ref.tr('in_queue', [ref.tr(appt.type.trim())])
                           : (appt.isCompleted
-                                ? ref.tr('completed_status', [appt.type])
-                                : ref.tr('upcoming_status', [appt.type])),
+                                ? ref.tr('completed_status', [
+                                    ref.tr(appt.type.trim()),
+                                  ])
+                                : ref.tr('upcoming_status', [
+                                    ref.tr(appt.type.trim()),
+                                  ])),
                     ),
                     trailing: appt.isWaiting && !appt.isCompleted
                         ? ElevatedButton(

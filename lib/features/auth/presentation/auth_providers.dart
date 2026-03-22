@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:appwrite/appwrite.dart';
 // ignore_for_file: deprecated_member_use
 import 'package:appwrite/models.dart' as models;
@@ -24,15 +26,54 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   return null;
 });
 
-// FutureProvider of Clinic Data based on the currentUser's clinicId
-final clinicStreamProvider = FutureProvider<ClinicGroup?>((ref) async {
-  final user = await ref.watch(currentUserProvider.future);
-  final authRepo = ref.watch(authRepositoryProvider);
-  if (user != null) {
-    return await authRepo.getClinicData(user.clinicId);
+// Realtime Clinic Data Notifier (Ensures Dashboard resets and settings sync instantly)
+final clinicStreamProvider =
+    AsyncNotifierProvider<ClinicNotifier, ClinicGroup?>(() {
+      return ClinicNotifier();
+    });
+
+class ClinicNotifier extends AsyncNotifier<ClinicGroup?> {
+  RealtimeSubscription? _subscription;
+
+  @override
+  FutureOr<ClinicGroup?> build() async {
+    final user = await ref.watch(currentUserProvider.future);
+    if (user == null) return null;
+
+    final authRepo = ref.watch(authRepositoryProvider);
+    final clinicId = user.clinicId;
+
+    // Initial fetch
+    final initialData = await authRepo.getClinicData(clinicId);
+
+    // Subscribe to Realtime for this specific clinic document
+    _subscribe(clinicId);
+
+    ref.onDispose(() {
+      _subscription?.close();
+    });
+
+    return initialData;
   }
-  return null;
-});
+
+  void _subscribe(String clinicId) {
+    _subscription?.close();
+    final realtime = ref.read(appwriteRealtimeProvider);
+
+    _subscription = realtime.subscribe([
+      'databases.$appwriteDatabaseId.collections.clinics.documents.$clinicId',
+    ]);
+
+    _subscription!.stream.listen((event) {
+      debugPrint('REALTIME CLINIC EVENT: ${event.events}');
+      final clinic = ClinicGroup.fromMap(
+        event.payload,
+        event.payload['\$id'] ?? clinicId,
+      );
+      state = AsyncData(clinic);
+    });
+  }
+}
 
 // Provider for the visibility threshold (24 hours ago OR last manual reset)
 final clinicVisibilityThresholdProvider = FutureProvider<DateTime>((ref) async {

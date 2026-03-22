@@ -138,6 +138,7 @@ class AppTranslations {
       'add_patient_to_queue_desc': 'إضافة مريض جديد للطابور',
       'record_financial_entry_desc': 'تسجيل قيد مالي جديد لليوم',
       'smart_clinic': 'العيادة الذكية',
+      'add_expense': 'إضافة مصروف',
 
       // Patients List
       'patients_record': 'سجل المرضى',
@@ -689,6 +690,7 @@ class AppTranslations {
       'add_patient_to_queue_desc': 'Add new patient to queue',
       'record_financial_entry_desc': 'Record new financial entry for today',
       'smart_clinic': 'Smart Clinic',
+      'add_expense': 'Add Expense',
 
       // Patients List
       'patients_record': 'Patients Record',

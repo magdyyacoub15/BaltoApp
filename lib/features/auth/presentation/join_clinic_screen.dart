@@ -46,6 +46,7 @@ class _JoinClinicScreenState extends ConsumerState<JoinClinicScreen> {
               password: _passwordController.text,
               clinicCode: _clinicCodeController.text.trim().toUpperCase(),
             );
+        debugPrint('User joined clinic successfully');
         if (mounted) context.go('/dashboard');
       } catch (e) {
         if (mounted) {

@@ -160,6 +160,10 @@ class AppointmentRepository {
         collectionId: 'appointments',
         documentId: newId,
         data: newAppt.toMap(),
+        permissions: [
+          Permission.read(Role.users()),
+          Permission.write(Role.users()),
+        ],
       );
     } catch (_) {
       // Offline fallback: The background sync will eventually handle this

@@ -357,36 +357,44 @@ class DashboardScreen extends ConsumerWidget {
     WidgetRef ref,
     AsyncValue<List<Appointment>> appointmentsAsync,
   ) {
+    if (appointmentsAsync.hasValue) {
+      final appointments = appointmentsAsync.value!;
+      if (appointments.isEmpty) {
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(40),
+          decoration: BoxDecoration(
+            color: Colors.white.withAlpha(20),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withAlpha(30)),
+          ),
+          child: Column(
+            children: [
+              const ScaledIcon(
+                Icons.event_busy_rounded,
+                size: 48,
+                color: Colors.white60,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                ref.tr('no_appointments'),
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+            ],
+          ),
+        );
+      }
+      return _QueueList(appointments: appointments);
+    }
+
     return appointmentsAsync.when(
-      data: (appointments) {
-        if (appointments.isEmpty) {
-          return Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(40),
-            decoration: BoxDecoration(
-              color: Colors.white.withAlpha(20),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withAlpha(30)),
-            ),
-            child: Column(
-              children: [
-                ScaledIcon(
-                  Icons.event_busy_rounded,
-                  size: 48,
-                  color: Colors.white60,
-                ),
-                SizedBox(height: 16),
-                Text(
-                  ref.tr('no_appointments'),
-                  style: const TextStyle(color: Colors.white70, fontSize: 16),
-                ),
-              ],
-            ),
-          );
-        }
-        return _QueueList(appointments: appointments);
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
+      data: (appointments) => _QueueList(appointments: appointments),
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20.0),
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      ),
       error: (e, st) => Center(child: Text('${ref.tr('error')}: $e')),
     );
   }
@@ -850,8 +858,9 @@ class DashboardScreen extends ConsumerWidget {
               ref.invalidate(dailyFinanceProvider);
 
               if (context.mounted) {
+                final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger.showSnackBar(
                   SnackBar(content: Text(ref.tr('dashboard_reset_success'))),
                 );
               }
@@ -902,7 +911,8 @@ class _QueueListState extends ConsumerState<_QueueList> {
     await ref
         .read(appointmentRepositoryProvider)
         .updateAppointment(appt.copyWith(isWaiting: false, isCompleted: true));
-    ref.invalidate(appointmentsStreamProvider);
+
+    // Allow Realtime to handle the update naturally without full refresh
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1029,7 +1039,7 @@ class _QueueListState extends ConsumerState<_QueueList> {
                       ),
                     ),
                     child: Text(
-                      ref.tr(appt.type),
+                      ref.tr(appt.type.trim()),
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
@@ -1139,6 +1149,8 @@ class _QueueListState extends ConsumerState<_QueueList> {
 
                     final patientName =
                         appt.patient?.name ?? ref.tr('unknown_patient');
+                    // Capture messenger before async gap
+                    final messenger = ScaffoldMessenger.of(context);
 
                     await ref
                         .read(appointmentRepositoryProvider)
@@ -1150,20 +1162,15 @@ class _QueueListState extends ConsumerState<_QueueList> {
                           appt.clinicId,
                         );
 
-                    ref.invalidate(appointmentsStreamProvider);
-                    ref.invalidate(transactionsStreamProvider);
-
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            ref.tr('deleted_from_queue', [patientName]),
-                          ),
-                          backgroundColor: Colors.red.shade400,
-                          duration: const Duration(seconds: 2),
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          ref.tr('deleted_from_queue', [patientName]),
                         ),
-                      );
-                    }
+                        backgroundColor: Colors.red.shade400,
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
                   },
                   child: item,
                 ),
