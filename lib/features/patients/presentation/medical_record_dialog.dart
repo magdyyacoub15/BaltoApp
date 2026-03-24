@@ -12,6 +12,7 @@ import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../accounts/data/transaction_repository.dart';
 import '../../accounts/domain/transaction.dart';
+import '../../accounts/domain/accounts_provider.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/localization/language_provider.dart';
 import '../domain/models/prescription.dart';
@@ -295,6 +296,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
           clinicId: user.clinicId,
         );
         await transactionRepo.addTransaction(revenue);
+        ref.invalidate(transactionsStreamProvider);
       }
 
       if (mounted) {

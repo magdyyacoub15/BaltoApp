@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/transaction.dart';
 import '../../../core/services/appwrite_client.dart';
 import '../../../core/services/hive_cache_service.dart';
-import '../../../core/services/connectivity_service.dart';
 
 final transactionRepositoryProvider = Provider(
   (ref) => TransactionRepository(
@@ -47,18 +46,6 @@ class TransactionRepository {
 
   Future<List<AppTransaction>> _fetchAndCache(String clinicId) async {
     try {
-      final isOnline = await checkIsOnline();
-      if (!isOnline) {
-        final cached = _cache.getCachedTransactions(clinicId);
-        final list =
-            cached
-                ?.map((m) => AppTransaction.fromMap(m, m['id'] ?? ''))
-                .toList() ??
-            [];
-        list.sort((a, b) => b.date.compareTo(a.date));
-        return list;
-      }
-
       final res = await _databases.listDocuments(
         databaseId: appwriteDatabaseId,
         collectionId: 'transactions',

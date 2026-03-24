@@ -82,7 +82,7 @@ class TransactionsNotifier extends AsyncNotifier<List<AppTransaction>> {
 
   void _startPolling(String clinicId, TransactionRepository repo) {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
       if (_isDisposed) return;
       try {
         final updated = await repo.refreshTransactions(clinicId);

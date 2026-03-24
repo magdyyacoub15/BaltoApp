@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../domain/appointment.dart';
 import '../data/appointment_repository.dart';
+import '../domain/appointments_provider.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../patients/domain/patients_provider.dart';
 import '../../patients/domain/models/medical_record.dart';
@@ -303,6 +304,22 @@ class AppointmentsListScreen extends ConsumerWidget {
     final user = ref.read(currentUserProvider).value;
     if (user == null) return;
 
+    final apptRepo = ref.read(appointmentRepositoryProvider);
+    final todayAppts = await apptRepo.getAppointments(
+      user.clinicId,
+      date: DateTime.now(),
+    );
+    if (todayAppts.where((a) => a.patientId == patient.id).isNotEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${patient.name} لديه كشف أو إعادة اليوم بالفعل'),
+          ),
+        );
+      }
+      return;
+    }
+
     final newAppointment = Appointment(
       id: '',
       patientId: patient.id,
@@ -344,6 +361,10 @@ class AppointmentsListScreen extends ConsumerWidget {
       parentRecordId: parentId,
     );
     await patientRepo.addMedicalRecord(patient.id, newRecord);
+
+    // Immediately refresh the dashboard queue
+    ref.invalidate(appointmentsStreamProvider);
+    ref.invalidate(patientsStreamProvider);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

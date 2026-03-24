@@ -6,8 +6,11 @@ import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../appointments/domain/appointment.dart';
 import '../../appointments/data/appointment_repository.dart';
+import '../../appointments/domain/appointments_provider.dart';
+import '../domain/patients_provider.dart';
 import '../../accounts/data/transaction_repository.dart';
 import '../../accounts/domain/transaction.dart';
+import '../../accounts/domain/accounts_provider.dart';
 import '../../../core/localization/language_provider.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../domain/models/medical_record.dart';
@@ -229,21 +232,17 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         );
         await repo.updatePatient(patientToSave);
 
-        // Create a financial transaction only if payment was actually added
-        if (paid > 0) {
-          final transactionRepo = ref.read(transactionRepositoryProvider);
-          await transactionRepo.addTransaction(
-            AppTransaction(
-              id: '',
-              amount: paid,
-              description: ref.tr('examine_patient', [patientToSave.name]),
-              type: TransactionType.revenue,
-              date: DateTime.now(),
-              clinicId: user.clinicId,
-            ),
-          );
+        final apptRepo = ref.read(appointmentRepositoryProvider);
+        final todayAppts = await apptRepo.getAppointments(
+          user.clinicId,
+          date: DateTime.now(),
+        );
+        final existingAppts = todayAppts.where(
+          (a) => a.patientId == widget.patient!.id,
+        );
+        if (existingAppts.isNotEmpty) {
+          newApptId = existingAppts.first.id;
         }
-        // (prevPaid was removed — no longer needed)
       } else {
         // ── New visit for a recognised (matched) existing patient ──
         final targetPatient = _matchedPatient!;
@@ -259,44 +258,55 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         );
         await repo.updatePatient(patientToSave);
 
-        // Add Appointment for current session
         final apptRepo = ref.read(appointmentRepositoryProvider);
-        newApptId = await apptRepo.addAppointment(
-          Appointment(
-            id: '',
-            patientId: patientId,
-            date: DateTime.now(),
-            type: _examType,
-            clinicId: user.clinicId,
-            isWaiting: true,
-            isManual: true,
-          ),
+        final todayAppts = await apptRepo.getAppointments(
+          user.clinicId,
+          date: DateTime.now(),
         );
+        final existingAppts = todayAppts.where((a) => a.patientId == patientId);
 
-        // Create Medical Record / Follow-up
-        String? parentId;
-        if (_examType == 're_examination') {
-          final mainRecords = targetPatient.records
-              .where((r) => r.parentRecordId == null)
-              .toList();
-          if (mainRecords.isNotEmpty) {
-            mainRecords.sort((a, b) => b.date.compareTo(a.date));
-            parentId = mainRecords.first.id;
+        if (existingAppts.isNotEmpty) {
+          // Patient already has an appointment today
+          newApptId = existingAppts.first.id;
+        } else {
+          // Add Appointment for current session
+          newApptId = await apptRepo.addAppointment(
+            Appointment(
+              id: '',
+              patientId: patientId,
+              date: DateTime.now(),
+              type: _examType,
+              clinicId: user.clinicId,
+              isWaiting: true,
+              isManual: true,
+            ),
+          );
+
+          // Create Medical Record / Follow-up
+          String? parentId;
+          if (_examType == 're_examination') {
+            final mainRecords = targetPatient.records
+                .where((r) => r.parentRecordId == null)
+                .toList();
+            if (mainRecords.isNotEmpty) {
+              mainRecords.sort((a, b) => b.date.compareTo(a.date));
+              parentId = mainRecords.first.id;
+            }
           }
-        }
 
-        await repo.addMedicalRecord(
-          patientId,
-          MedicalRecord(
-            id: '',
-            date: DateTime.now(),
-            diagnosis: '',
-            doctorNotes: '',
-            paidAmount: paid,
-            remainingAmount: remaining,
-            parentRecordId: parentId,
-          ),
-        );
+          await repo.addMedicalRecord(
+            patientId,
+            MedicalRecord(
+              id: '',
+              date: DateTime.now(),
+              diagnosis: '',
+              doctorNotes: '',
+              paidAmount: paid,
+              remainingAmount: remaining,
+              parentRecordId: parentId,
+            ),
+          );
+        }
       }
 
       // Financial Transaction
@@ -313,10 +323,12 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             appointmentId: newApptId.isNotEmpty ? newApptId : null,
           ),
         );
+        ref.invalidate(transactionsStreamProvider);
       }
 
-      // Realtime subscription and polling will handle the UI update naturally
-      // without forcing a full screen loading flicker.
+      // Force immediate UI refresh on dashboard
+      ref.invalidate(appointmentsStreamProvider);
+      ref.invalidate(patientsStreamProvider);
 
       if (mounted) {
         ScaffoldMessenger.of(

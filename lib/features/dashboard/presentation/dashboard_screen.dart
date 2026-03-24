@@ -912,7 +912,9 @@ class _QueueListState extends ConsumerState<_QueueList> {
         .read(appointmentRepositoryProvider)
         .updateAppointment(appt.copyWith(isWaiting: false, isCompleted: true));
 
-    // Allow Realtime to handle the update naturally without full refresh
+    // Immediate local update — don't wait for Realtime
+    ref.invalidate(appointmentsStreamProvider);
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1152,6 +1154,37 @@ class _QueueListState extends ConsumerState<_QueueList> {
                     // Capture messenger before async gap
                     final messenger = ScaffoldMessenger.of(context);
 
+                    // Revert patient finances and remove today's visit record
+                    if (appt.patient != null) {
+                      final pt = appt.patient!;
+                      final todayRecordIndex = pt.records.lastIndexWhere(
+                        (r) =>
+                            r.date.year == appt.date.year &&
+                            r.date.month == appt.date.month &&
+                            r.date.day == appt.date.day,
+                      );
+
+                      if (todayRecordIndex != -1) {
+                        final updatedRecords = [...pt.records];
+                        final removedRecord = updatedRecords.removeAt(
+                          todayRecordIndex,
+                        );
+
+                        final ptPaid = pt.paidAmount - removedRecord.paidAmount;
+                        final ptRem =
+                            pt.remainingAmount - removedRecord.remainingAmount;
+
+                        final updatedPatient = pt.copyWith(
+                          records: updatedRecords,
+                          paidAmount: ptPaid < 0 ? 0 : ptPaid,
+                          remainingAmount: ptRem < 0 ? 0 : ptRem,
+                        );
+                        await ref
+                            .read(patientRepositoryProvider)
+                            .updatePatient(updatedPatient);
+                      }
+                    }
+
                     await ref
                         .read(appointmentRepositoryProvider)
                         .deleteAppointment(appt.id, appt.clinicId);
@@ -1161,6 +1194,10 @@ class _QueueListState extends ConsumerState<_QueueList> {
                           appt.id,
                           appt.clinicId,
                         );
+
+                    ref.invalidate(
+                      transactionsStreamProvider,
+                    ); // Explicit UI Update
 
                     messenger.showSnackBar(
                       SnackBar(

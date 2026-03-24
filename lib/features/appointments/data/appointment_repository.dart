@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/appointment.dart';
 import '../../../core/services/appwrite_client.dart';
 import '../../../core/services/hive_cache_service.dart';
-import '../../../core/services/connectivity_service.dart';
 
 final appointmentRepositoryProvider = Provider(
   (ref) => AppointmentRepository(
@@ -55,17 +54,6 @@ class AppointmentRepository {
     DateTime? startAfter,
   }) async {
     try {
-      final isOnline = await checkIsOnline();
-      if (!isOnline) {
-        final cached = _cache.getCachedAppointments(clinicId);
-        final all =
-            cached
-                ?.map((m) => Appointment.fromMap(m, m['id'] ?? ''))
-                .toList() ??
-            [];
-        return _filterAndSort(all, date: date, startAfter: startAfter);
-      }
-
       final res = await _databases.listDocuments(
         databaseId: appwriteDatabaseId,
         collectionId: 'appointments',

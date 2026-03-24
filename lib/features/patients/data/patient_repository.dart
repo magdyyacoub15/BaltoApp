@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/services/cleanup_service.dart';
 import '../../../core/services/hive_cache_service.dart';
-import '../../../core/services/connectivity_service.dart';
 import '../domain/patient.dart';
 import '../domain/models/medical_record.dart';
 import '../../../core/services/appwrite_client.dart';
@@ -52,13 +51,6 @@ class PatientRepository {
 
   Future<List<Patient>> _fetchAndCachePatients(String clinicId) async {
     try {
-      final isOnline = await checkIsOnline();
-      if (!isOnline) {
-        final cached = _cache.getCachedPatients(clinicId);
-        return cached?.map((m) => Patient.fromMap(m, m['id'] ?? '')).toList() ??
-            [];
-      }
-
       final List<Patient> all = [];
       int offset = 0;
       const int batchSize = 100;

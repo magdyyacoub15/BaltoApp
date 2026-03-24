@@ -34,6 +34,7 @@ final clinicStreamProvider =
 
 class ClinicNotifier extends AsyncNotifier<ClinicGroup?> {
   RealtimeSubscription? _subscription;
+  bool _isPolling = true;
 
   @override
   FutureOr<ClinicGroup?> build() async {
@@ -49,8 +50,12 @@ class ClinicNotifier extends AsyncNotifier<ClinicGroup?> {
     // Subscribe to Realtime for this specific clinic document
     _subscribe(clinicId);
 
+    // Polling fallback — ensures End Day resets propagate even if Realtime drops
+    _startPolling(clinicId);
+
     ref.onDispose(() {
       _subscription?.close();
+      _isPolling = false;
     });
 
     return initialData;
@@ -64,14 +69,45 @@ class ClinicNotifier extends AsyncNotifier<ClinicGroup?> {
       'databases.$appwriteDatabaseId.collections.clinics.documents.$clinicId',
     ]);
 
-    _subscription!.stream.listen((event) {
-      debugPrint('REALTIME CLINIC EVENT: ${event.events}');
-      final clinic = ClinicGroup.fromMap(
-        event.payload,
-        event.payload['\$id'] ?? clinicId,
-      );
-      state = AsyncData(clinic);
-    });
+    _subscription!.stream.listen(
+      (event) {
+        debugPrint('REALTIME CLINIC EVENT: ${event.events}');
+        final clinic = ClinicGroup.fromMap(
+          event.payload,
+          event.payload['\$id'] ?? clinicId,
+        );
+        state = AsyncData(clinic);
+      },
+      onError: (e) {
+        debugPrint('REALTIME CLINIC ERROR: $e');
+        Future.delayed(const Duration(seconds: 5), () {
+          if (_isPolling) _subscribe(clinicId);
+        });
+      },
+      onDone: () {
+        debugPrint('REALTIME CLINIC DONE');
+        Future.delayed(const Duration(seconds: 5), () {
+          if (_isPolling) _subscribe(clinicId);
+        });
+      },
+    );
+  }
+
+  void _startPolling(String clinicId) async {
+    while (_isPolling) {
+      await Future.delayed(const Duration(seconds: 15));
+      if (!_isPolling) break;
+      try {
+        final authRepo = ref.read(authRepositoryProvider);
+        final fresh = await authRepo.getClinicData(clinicId);
+        if (!_isPolling) break;
+        // Only update if lastShiftReset changed to avoid unnecessary rebuilds
+        final current = state.value;
+        if (fresh?.lastShiftReset != current?.lastShiftReset) {
+          state = AsyncData(fresh);
+        }
+      } catch (_) {}
+    }
   }
 }
 
