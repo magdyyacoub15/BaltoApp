@@ -1,11 +1,8 @@
-import 'package:appwrite/appwrite.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/services/polling_service.dart';
 import 'patient.dart';
-import '../../../core/services/appwrite_client.dart';
 
 // ─── Manual Refresh Trigger for Patients ─────────────────────────────────────
 class PatientsRefreshNotifier extends Notifier<int> {
@@ -40,7 +37,7 @@ final patientsStreamProvider = StreamProvider<List<Patient>>((ref) async* {
 });
 
 // Search query notifier
-class SearchQuery extends Notifier<String> {
+class SearchQueryNotifier extends Notifier<String> {
   @override
   String build() => '';
   void update(String query) => state = query;

@@ -138,7 +138,6 @@ class AppTranslations {
       'add_patient_to_queue_desc': 'إضافة مريض جديد للطابور',
       'record_financial_entry_desc': 'تسجيل قيد مالي جديد لليوم',
       'smart_clinic': 'العيادة الذكية',
-      'add_expense': 'إضافة مصروف',
 
       // Patients List
       'patients_record': 'سجل المرضى',
@@ -449,7 +448,6 @@ class AppTranslations {
       'image_load_failed': 'فشل تحميل الصورة',
       're_examine_patient': 'إعادة كشف مريض: {}',
       'examine_new_patient': 'كشف مريض جديد: {}',
-      'examine_patient': 'كشف مريض: {}',
       'data_saved_successfully': 'تم حفظ البيانات بنجاح',
       'pick_from_gallery': 'اختيار من المعرض',
       'take_camera_picture': 'التقاط صورة بالكاميرا',
@@ -586,7 +584,7 @@ class AppTranslations {
       'confirm_cancellation_message': 'هل أنت متأكد من رغبتك في إلغاء الاشتراك؟ سيتم تعطيل الإضافة فوراً.',
       'delete_error': 'فشل الحذف: {}',
       'delete_everything': 'حذف كل شيء نهائياً',
-      'delete_system_warning': 'تحذير: سيتم حذف جميع بيانات عيادة "{}" نهائياً ولا يمكن التراجع.',
+      'delete_system_warning': 'تحذير: سيتم حذف جميع بيانات عيادة \"{}\" نهائياً ولا يمكن التراجع.',
       'error': 'خطأ',
       'examine_patient': 'كشف على مريض: {}',
       'extreme_caution': 'تحذير شديد!',
@@ -743,7 +741,6 @@ class AppTranslations {
       'add_patient_to_queue_desc': 'Add new patient to queue',
       'record_financial_entry_desc': 'Record new financial entry for today',
       'smart_clinic': 'Smart Clinic',
-      'add_expense': 'Add Expense',
 
       // Patients List
       'patients_record': 'Patients Record',
@@ -1050,7 +1047,6 @@ class AppTranslations {
       'image_load_failed': 'Failed to load image',
       're_examine_patient': 'Re-examine patient: {}',
       'examine_new_patient': 'Examine new patient: {}',
-      'examine_patient': 'Examine patient: {}',
       'data_saved_successfully': 'Data saved successfully',
       'pick_from_gallery': 'Pick from Gallery',
       'take_camera_picture': 'Take Camera Picture',

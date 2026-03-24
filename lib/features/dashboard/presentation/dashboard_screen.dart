@@ -12,8 +12,8 @@ import '../../auth/data/auth_repository.dart';
 import '../../accounts/domain/accounts_provider.dart';
 import '../../accounts/data/transaction_repository.dart';
 import '../../accounts/domain/transaction.dart';
-import '../../patients/domain/models/medical_record.dart';
 import '../../patients/data/patient_repository.dart';
+import '../../patients/domain/models/medical_record.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
 import '../../../core/presentation/widgets/delete_confirmation_dialog.dart';
@@ -28,6 +28,7 @@ class DashboardScreen extends ConsumerWidget {
     final todayAppointmentsCount = ref.watch(todayAppointmentsCountProvider);
     final waitingNowCount = ref.watch(waitingPatientsCountProvider);
     final quickAppointmentsAsync = ref.watch(enrichedAppointmentsProvider);
+    final removedIds = ref.watch(removedAppointmentIdsProvider);
     final dailyFinance = ref.watch(dailyFinanceProvider);
 
     return Scaffold(
@@ -299,30 +300,52 @@ class DashboardScreen extends ConsumerWidget {
             ),
           );
         }
-        return ReorderableListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: appointments.length,
-          onReorder: (int oldIndex, int newIndex) async {
-            if (oldIndex < newIndex) {
-              newIndex -= 1;
-            }
-            final item = appointments.removeAt(oldIndex);
-            appointments.insert(newIndex, item);
+            final rawAppointments = appointments;
+            final appointmentsFiltered = rawAppointments.where((a) => !removedIds.contains(a.id)).toList();
 
-            // Update queueOrder for the reordered list
-            final updatedAppointments = <Appointment>[];
-            for (int i = 0; i < appointments.length; i++) {
-              updatedAppointments.add(appointments[i].copyWith(queueOrder: i));
+            if (appointmentsFiltered.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      Icon(Icons.event_busy, color: Colors.white24, size: 48),
+                      SizedBox(height: 12),
+                      Text(
+                        ref.tr('no_appointments_today'),
+                        style: TextStyle(color: Colors.white38),
+                      ),
+                    ],
+                  ),
+                ),
+              );
             }
 
-            // Save new order to Firestore
-            await ref
-                .read(appointmentRepositoryProvider)
-                .updateQueueOrder(updatedAppointments);
-          },
-          itemBuilder: (context, index) {
-            final appt = appointments[index];
+            return ReorderableListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: appointmentsFiltered.length,
+              onReorder: (int oldIndex, int newIndex) async {
+                final listForReorder = List<Appointment>.from(appointmentsFiltered);
+                if (oldIndex < newIndex) {
+                  newIndex -= 1;
+                }
+                final item = listForReorder.removeAt(oldIndex);
+                listForReorder.insert(newIndex, item);
+
+                // Update queueOrder for the reordered list
+                final updatedAppointments = <Appointment>[];
+                for (int i = 0; i < listForReorder.length; i++) {
+                  updatedAppointments.add(listForReorder[i].copyWith(queueOrder: i));
+                }
+
+                // Save new order to Firestore
+                await ref
+                    .read(appointmentRepositoryProvider)
+                    .updateQueueOrder(updatedAppointments);
+              },
+              itemBuilder: (context, index) {
+                final appt = appointmentsFiltered[index];
             final item = Container(
               margin: const EdgeInsets.only(bottom: 12),
               decoration: BoxDecoration(
@@ -531,51 +554,85 @@ class DashboardScreen extends ConsumerWidget {
                         final patientName =
                             appt.patient?.name ?? ref.tr('unknown_patient');
 
-                        // --- NEW: Cleanup Financials and Medical Records ---
-                        if (appt.patient != null) {
-                          final patient = appt.patient!;
-                          // Find the non-finalized record (usually the one created for this appointment)
-                          final recordIndex =
-                              patient.records.indexWhere((r) => !r.isFinalized);
-
-                          if (recordIndex != -1) {
-                            final record = patient.records[recordIndex];
-
-                            // 1. Delete associated transaction if exists
-                            if (record.transactionId != null) {
-                              await ref
-                                  .read(transactionRepositoryProvider)
-                                  .deleteTransaction(
-                                    record.transactionId!,
-                                    apptClinicId,
-                                  );
-                            }
-
-                            // 2. Remove the medical record from patient profile
-                            final updatedRecords =
-                                List<MedicalRecord>.from(patient.records);
-                            updatedRecords.removeAt(recordIndex);
-                            await ref.read(patientRepositoryProvider).updatePatient(
-                                  patient.copyWith(records: updatedRecords),
+                        // --- IMMEDIATE LOCAL REMOVAL (Fixes Dismissible Error) ---
+                        ref.read(removedAppointmentIdsProvider.notifier).add(apptId);
+                        
+                        try {
+                          // --- Financial & Record Cleanup Logic ---
+                          if (appt.patient != null) {
+                            final patient = appt.patient!;
+                            
+                            // 1. Precise Record Matching (by date/time within 1-minute window)
+                            final apptDate = appt.date;
+                            final recordIndex = patient.records.indexWhere((r) {
+                              final diff = r.date.difference(apptDate).abs();
+                              return diff.inMinutes == 0; // Check if same minute
+                            });
+                            
+                            if (recordIndex != -1) {
+                              final record = patient.records[recordIndex];
+                              
+                              // 2. Transaction Deletion
+                              if (record.transactionId != null && record.transactionId!.isNotEmpty) {
+                                await ref.read(transactionRepositoryProvider).deleteTransaction(
+                                  record.transactionId!,
+                                  apptClinicId,
                                 );
+                              }
+                              
+                              // 3. Financial Adjustment (Reverse the amounts)
+                              final updatedPaid = (patient.paidAmount - record.paidAmount).clamp(0.0, double.infinity);
+                              final updatedRemaining = (patient.remainingAmount - record.remainingAmount).clamp(0.0, double.infinity);
+                              
+                              // 4. Update Patient (remove record + adjust totals)
+                              final updatedRecords = List<MedicalRecord>.from(patient.records);
+                              updatedRecords.removeAt(recordIndex);
+                              
+                              await ref.read(patientRepositoryProvider).updatePatient(
+                                patient.copyWith(
+                                  records: updatedRecords,
+                                  paidAmount: updatedPaid,
+                                  remainingAmount: updatedRemaining,
+                                ),
+                              );
+                            }
                           }
-                        }
 
-                        // 3. Delete the appointment as usual
-                        await ref
-                            .read(appointmentRepositoryProvider)
-                            .deleteAppointment(apptId, apptClinicId);
+                          // 5. Delete the appointment from repository
+                          await ref
+                              .read(appointmentRepositoryProvider)
+                              .deleteAppointment(apptId, apptClinicId);
 
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                ref.tr('deleted_from_queue', [patientName]),
+                          if (context.mounted) {
+                            // Refresh financial state providers
+                            ref.read(transactionsRefreshProvider.notifier).refresh();
+                            ref.read(patientsRefreshProvider.notifier).refresh();
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  ref.tr('deleted_from_queue', [patientName]),
+                                ),
+                                backgroundColor: Colors.red.shade400,
+                                duration: const Duration(seconds: 2),
                               ),
-                              backgroundColor: Colors.red.shade400,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
+                            );
+                          }
+                        } catch (e) {
+                          debugPrint('❌ [Dashboard] Error during dismissal cleanup: $e');
+                          // Even if cleanup fails, ensure the appointment is attempted to be deleted
+                          try {
+                            await ref.read(appointmentRepositoryProvider).deleteAppointment(apptId, apptClinicId);
+                          } catch (_) {}
+                          
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(ref.tr('error')),
+                                backgroundColor: Colors.orange,
+                              ),
+                            );
+                          }
                         }
                       },
                       child: item,
@@ -583,20 +640,49 @@ class DashboardScreen extends ConsumerWidget {
             );
           },
         );
-      }
-      return _QueueList(appointments: appointments);
-    }
-
-    return appointmentsAsync.when(
-      data: (appointments) => _QueueList(appointments: appointments),
-      loading: () => const Center(
-        child: Padding(
-          padding: EdgeInsets.all(20.0),
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      ),
+      },
+      loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, st) => Center(child: Text('${ref.tr('error')}: $e')),
     );
+  }
+
+  // --- Helper Methods (Reused Logic) ---
+
+  Color _getStatusColor(Appointment appt) {
+    if (appt.isCompleted) return Colors.green;
+    if (appt.type == 're_examination' ||
+        appt.type == 'إعادة كشف' ||
+        appt.type == 'Re-examination') {
+      return Colors.orangeAccent;
+    }
+    if (appt.type == 'new_examination' ||
+        appt.type == 'كشف جديد' ||
+        appt.type == 'New Examination') {
+      return Colors.cyanAccent;
+    }
+    return Colors.white70;
+  }
+
+  Future<void> _completeAppointment(
+    BuildContext context,
+    WidgetRef ref,
+    Appointment appt,
+  ) async {
+    final user = ref.read(currentUserProvider).value;
+    if (user == null) return;
+    await ref
+        .read(appointmentRepositoryProvider)
+        .updateAppointment(appt.copyWith(isWaiting: false, isCompleted: true));
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          content: Text(ref.tr('logged_in_success')),
+        ),
+      );
+    }
   }
 
   void _showAddExpenseDialog(BuildContext context, WidgetRef ref) {
@@ -671,117 +757,108 @@ class DashboardScreen extends ConsumerWidget {
 
     showDialog(
       context: context,
-      builder: (context) => Consumer(
-        builder: (context, ref, _) {
-          final threshold =
-              ref.watch(clinicVisibilityThresholdProvider).value ??
-              DateTime(2000);
-          final transactionsAsync = ref.watch(transactionsStreamProvider);
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            title: Text(
-              ref.tr('income_details'),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: transactionsAsync.when(
-                data: (transactions) {
-                  final todayIncomes = transactions
-                      .where(
-                        (t) =>
-                            (t.date.isAfter(threshold) ||
-                                t.date.isAtSameMomentAs(threshold)) &&
-                            t.type == TransactionType.revenue,
-                      )
-                      .toList();
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          ref.tr('income_details'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: transactionsAsync.when(
+            data: (transactions) {
+              final todayIncomes = transactions
+                  .where(
+                    (t) =>
+                        (t.date.isAfter(threshold) ||
+                            t.date.isAtSameMomentAs(threshold)) &&
+                        t.type == TransactionType.revenue,
+                  )
+                  .toList();
 
-                  if (todayIncomes.isEmpty) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(ref.tr('no_income_today')),
+              if (todayIncomes.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(ref.tr('no_income_today')),
+                  ),
+                );
+              }
+
+              return ListView.separated(
+                shrinkWrap: true,
+                itemCount: todayIncomes.length,
+                separatorBuilder: (context, index) => const Divider(),
+                itemBuilder: (context, index) {
+                  final income = todayIncomes[index];
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 0,
+                      vertical: 0,
+                    ),
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Colors.greenAccent.withValues(
+                        alpha: 0.2,
                       ),
-                    );
-                  }
-
-                  return ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: todayIncomes.length,
-                    separatorBuilder: (context, index) => const Divider(),
-                    itemBuilder: (context, index) {
-                      final income = todayIncomes[index];
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 0,
-                          vertical: 0,
+                      child: Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
                         ),
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.greenAccent.withValues(alpha: 0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.trending_up,
-                            color: Colors.green,
-                            size: 20,
-                          ),
-                        ),
-                        title: Text(
-                          income.description.isNotEmpty
-                              ? income.description
-                              : ref.tr('unspecified_revenue'),
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
+                      ),
+                    ),
+                    title: Text(
+                      income.description.isNotEmpty
+                          ? income.description
+                          : ref.tr('unspecified_revenue'),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(
+                          DateFormat(
+                            'hh:mm a',
+                            ref.watch(languageProvider).languageCode,
+                          ).format(income.date),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
                           ),
                         ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              DateFormat(
-                                'hh:mm a',
-                                langCode,
-                              ).format(income.date),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        trailing: Text(
-                          '+${income.amount.toInt()} ${ref.tr('currency')}',
-                          style: const TextStyle(
-                            color: Colors.green,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                      );
-                    },
+                      ],
+                    ),
+                    trailing: Text(
+                      '+${income.amount.toInt()} ${ref.tr('currency')}',
+                      style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
                   );
                 },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(
-                  child: Text(ref.tr('error_occurred', [e.toString()])),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(ref.tr('close')),
-              ),
-            ],
-          );
-        },
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) =>
+                Center(child: Text(ref.tr('error_occurred', [e.toString()]))),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(ref.tr('close')),
+          ),
+        ],
       ),
     );
   }
@@ -792,117 +869,106 @@ class DashboardScreen extends ConsumerWidget {
 
     showDialog(
       context: context,
-      builder: (context) => Consumer(
-        builder: (context, ref, _) {
-          final threshold =
-              ref.watch(clinicVisibilityThresholdProvider).value ??
-              DateTime(2000);
-          final transactionsAsync = ref.watch(transactionsStreamProvider);
-          return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            title: Text(
-              ref.tr('expense_details'),
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: transactionsAsync.when(
-                data: (transactions) {
-                  final todayExpenses = transactions
-                      .where(
-                        (t) =>
-                            (t.date.isAfter(threshold) ||
-                                t.date.isAtSameMomentAs(threshold)) &&
-                            t.type == TransactionType.expense,
-                      )
-                      .toList();
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Text(
+          ref.tr('expense_details'),
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: transactionsAsync.when(
+            data: (transactions) {
+              final todayExpenses = transactions
+                  .where(
+                    (t) =>
+                        (t.date.isAfter(threshold) ||
+                            t.date.isAtSameMomentAs(threshold)) &&
+                        t.type == TransactionType.expense,
+                  )
+                  .toList();
 
-                  if (todayExpenses.isEmpty) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text(ref.tr('no_expenses_today')),
+              if (todayExpenses.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Text(ref.tr('no_expenses_today')),
+                  ),
+                );
+              }
+
+              return ListView.separated(
+                shrinkWrap: true,
+                itemCount: todayExpenses.length,
+                separatorBuilder: (context, index) => const Divider(),
+                itemBuilder: (context, index) {
+                  final expense = todayExpenses[index];
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 0,
+                      vertical: 0,
+                    ),
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Colors.redAccent.withValues(alpha: 0.2),
+                      child: Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
                       ),
-                    );
-                  }
-
-                  return ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: todayExpenses.length,
-                    separatorBuilder: (context, index) => const Divider(),
-                    itemBuilder: (context, index) {
-                      final expense = todayExpenses[index];
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 0,
-                          vertical: 0,
-                        ),
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent.withValues(alpha: 0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.trending_down,
-                            color: Colors.red,
-                            size: 20,
-                          ),
-                        ),
-                        title: Text(
-                          expense.description.isNotEmpty
-                              ? expense.description
-                              : ref.tr('unspecified_expense'),
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
+                    ),
+                    title: Text(
+                      expense.description.isNotEmpty
+                          ? expense.description
+                          : ref.tr('unspecified_expense'),
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 4),
+                        Text(
+                          DateFormat(
+                            'hh:mm a',
+                            ref.watch(languageProvider).languageCode,
+                          ).format(expense.date),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
                           ),
                         ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(
-                              DateFormat(
-                                'hh:mm a',
-                                langCode,
-                              ).format(expense.date),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        trailing: Text(
-                          '-${expense.amount.toInt()} ${ref.tr('currency')}',
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                      );
-                    },
+                      ],
+                    ),
+                    trailing: Text(
+                      '-${expense.amount.toInt()} ${ref.tr('currency')}',
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
                   );
                 },
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(
-                  child: Text(ref.tr('error_occurred', [e.toString()])),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(ref.tr('close')),
-              ),
-            ],
-          );
-        },
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) =>
+                Center(child: Text(ref.tr('error_occurred', [e.toString()]))),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(ref.tr('close')),
+          ),
+        ],
       ),
     );
   }
@@ -1058,11 +1124,11 @@ class DashboardScreen extends ConsumerWidget {
               ref.invalidate(clinicStreamProvider);
               ref.invalidate(appointmentsStreamProvider);
               ref.invalidate(dailyFinanceProvider);
+              ref.read(removedAppointmentIdsProvider.notifier).clear();
 
               if (context.mounted) {
-                final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
-                messenger.showSnackBar(
+                ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text(ref.tr('dashboard_reset_success'))),
                 );
               }
@@ -1075,346 +1141,6 @@ class DashboardScreen extends ConsumerWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ─── Queue List Widget (with dismissal-tracking to prevent crash) ──────────────
-class _QueueList extends ConsumerStatefulWidget {
-  const _QueueList({required this.appointments});
-  final List<Appointment> appointments;
-
-  @override
-  ConsumerState<_QueueList> createState() => _QueueListState();
-}
-
-class _QueueListState extends ConsumerState<_QueueList> {
-  // IDs dismissed locally — prevents 'dismissed Dismissible still in tree' crash
-  final Set<String> _dismissedIds = {};
-
-  Color _getStatusColor(Appointment appt) {
-    if (appt.isCompleted) return Colors.green;
-    if (appt.type == 're_examination' ||
-        appt.type == 'إعادة كشف' ||
-        appt.type == 'Re-examination') {
-      return Colors.orangeAccent;
-    }
-    if (appt.type == 'new_examination' ||
-        appt.type == 'كشف جديد' ||
-        appt.type == 'New Examination') {
-      return Colors.cyanAccent;
-    }
-    return Colors.white70;
-  }
-
-  Future<void> _completeAppointment(Appointment appt) async {
-    final user = ref.read(currentUserProvider).value;
-    if (user == null) return;
-    await ref
-        .read(appointmentRepositoryProvider)
-        .updateAppointment(appt.copyWith(isWaiting: false, isCompleted: true));
-
-    // Immediate local update — don't wait for Realtime
-    ref.invalidate(appointmentsStreamProvider);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          content: Text(ref.tr('logged_in_success')),
-        ),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final appointments = widget.appointments
-        .where((a) => !_dismissedIds.contains(a.id))
-        .toList();
-
-    return ReorderableListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: appointments.length,
-      onReorder: (int oldIndex, int newIndex) async {
-        if (oldIndex < newIndex) newIndex -= 1;
-        final updated = List<Appointment>.from(appointments);
-        final item = updated.removeAt(oldIndex);
-        updated.insert(newIndex, item);
-        final reordered = [
-          for (int i = 0; i < updated.length; i++)
-            updated[i].copyWith(queueOrder: i),
-        ];
-        await ref
-            .read(appointmentRepositoryProvider)
-            .updateQueueOrder(reordered);
-        ref.invalidate(appointmentsStreamProvider);
-      },
-      itemBuilder: (context, index) {
-        final appt = appointments[index];
-        final item = Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: appt.isCompleted
-                ? Colors.green.withAlpha(20)
-                : Colors.white.withAlpha(25),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: appt.isCompleted
-                  ? Colors.green.withAlpha(80)
-                  : Colors.white.withAlpha(30),
-              width: appt.isCompleted ? 1.5 : 1,
-            ),
-          ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 4,
-            ),
-            onTap: appt.patient != null
-                ? () {
-                    showDialog(
-                      context: context,
-                      builder: (context) =>
-                          AddPatientScreen(patient: appt.patient),
-                    );
-                  }
-                : null,
-            leading: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: Colors.white.withAlpha(20),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Center(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    '${index + 1}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            title: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Text(
-                appt.patient?.name ?? ref.tr('patient_not_known'),
-                maxLines: 1,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            subtitle: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Row(
-                children: [
-                  Text(
-                    DateFormat(
-                      'hh:mm a',
-                      ref.watch(languageProvider).languageCode,
-                    ).format(appt.date),
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                  const Text(' • ', style: TextStyle(color: Colors.white30)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: _getStatusColor(appt).withAlpha(50),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                        color: _getStatusColor(appt).withAlpha(100),
-                        width: 1,
-                      ),
-                    ),
-                    child: Text(
-                      ref.tr(appt.type.trim()),
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: _getStatusColor(appt).withAlpha(255),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (appt.patient != null)
-                  IconButton(
-                    icon: const Icon(
-                      Icons.contact_page_outlined,
-                      color: Colors.white70,
-                      size: 20,
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              PatientProfileScreen(patient: appt.patient!),
-                        ),
-                      );
-                    },
-                  ),
-                const SizedBox(width: 4),
-                appt.isWaiting && !appt.isCompleted
-                    ? SizedBox(
-                        height: 32,
-                        child: ElevatedButton(
-                          onPressed: () => _completeAppointment(appt),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          child: Text(
-                            ref.tr('enter'),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      )
-                    : (appt.isCompleted
-                          ? const Icon(
-                              Icons.check_circle,
-                              color: Colors.green,
-                              size: 20,
-                            )
-                          : const Icon(
-                              Icons.access_time,
-                              color: Colors.orange,
-                              size: 20,
-                            )),
-              ],
-            ),
-          ),
-        );
-
-        return ReorderableDelayedDragStartListener(
-          index: index,
-          key: Key(appt.id),
-          child: appt.isCompleted
-              ? item
-              : Dismissible(
-                  key: Key('dismiss_${appt.id}'),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade400,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    alignment: Alignment.centerLeft,
-                    padding: const EdgeInsets.only(left: 20),
-                    child: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.white,
-                    ),
-                  ),
-                  confirmDismiss: (direction) async {
-                    return await showDialog<bool>(
-                      context: context,
-                      builder: (context) => DeleteConfirmationDialog(
-                        title: ref.tr('delete_from_queue'),
-                        content: ref.tr('delete_confirm_queue', [
-                          appt.patient?.name ?? ref.tr('patient_not_known'),
-                        ]),
-                        onDelete: () {},
-                      ),
-                    );
-                  },
-                  onDismissed: (direction) async {
-                    // Immediately hide from UI — prevents crash
-                    setState(() => _dismissedIds.add(appt.id));
-
-                    final patientName =
-                        appt.patient?.name ?? ref.tr('unknown_patient');
-                    // Capture messenger before async gap
-                    final messenger = ScaffoldMessenger.of(context);
-
-                    // Revert patient finances and remove today's visit record
-                    if (appt.patient != null) {
-                      final pt = appt.patient!;
-                      final todayRecordIndex = pt.records.lastIndexWhere(
-                        (r) =>
-                            r.date.year == appt.date.year &&
-                            r.date.month == appt.date.month &&
-                            r.date.day == appt.date.day,
-                      );
-
-                      if (todayRecordIndex != -1) {
-                        final updatedRecords = [...pt.records];
-                        final removedRecord = updatedRecords.removeAt(
-                          todayRecordIndex,
-                        );
-
-                        final ptPaid = pt.paidAmount - removedRecord.paidAmount;
-                        final ptRem =
-                            pt.remainingAmount - removedRecord.remainingAmount;
-
-                        final updatedPatient = pt.copyWith(
-                          records: updatedRecords,
-                          paidAmount: ptPaid < 0 ? 0 : ptPaid,
-                          remainingAmount: ptRem < 0 ? 0 : ptRem,
-                        );
-                        await ref
-                            .read(patientRepositoryProvider)
-                            .updatePatient(updatedPatient);
-                      }
-                    }
-
-                    await ref
-                        .read(appointmentRepositoryProvider)
-                        .deleteAppointment(appt.id, appt.clinicId);
-                    await ref
-                        .read(transactionRepositoryProvider)
-                        .deleteTransactionByAppointmentId(
-                          appt.id,
-                          appt.clinicId,
-                        );
-
-                    ref.invalidate(
-                      transactionsStreamProvider,
-                    ); // Explicit UI Update
-
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          ref.tr('deleted_from_queue', [patientName]),
-                        ),
-                        backgroundColor: Colors.red.shade400,
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                  child: item,
-                ),
-        );
-      },
     );
   }
 }

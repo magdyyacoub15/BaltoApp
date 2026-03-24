@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 import '../domain/patient.dart';
 import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -315,15 +316,24 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
 
           if (existingNonFinalizedIndex != -1) {
             // Update existing record (e.g., if re-adding from queue to change type)
-             final updatedRecords = List<MedicalRecord>.from(targetPatient.records);
-             updatedRecords[existingNonFinalizedIndex] = updatedRecords[existingNonFinalizedIndex].copyWith(
-               paidAmount: totalPaid,
-               remainingAmount: remaining,
-               transactionId: currentTransactionId,
-               // Update parent if it's now a re-examination and didn't have one
-               parentRecordId: _examType == 're_examination' ? (updatedRecords[existingNonFinalizedIndex].parentRecordId ?? _findLatestRootRecordId(targetPatient)) : null,
-             );
-             await repo.updatePatient(updatedPatient.copyWith(records: updatedRecords));
+              final updatedRecords = List<MedicalRecord>.from(targetPatient.records);
+              final oldRecord = updatedRecords[existingNonFinalizedIndex];
+              final paidDiff = totalPaid - oldRecord.paidAmount;
+              final remainingDiff = remaining - oldRecord.remainingAmount;
+
+              updatedRecords[existingNonFinalizedIndex] = oldRecord.copyWith(
+                paidAmount: totalPaid,
+                remainingAmount: remaining,
+                transactionId: currentTransactionId,
+                // Update parent if it's now a re-examination and didn't have one
+                parentRecordId: _examType == 're_examination' ? (oldRecord.parentRecordId ?? _findLatestRootRecordId(targetPatient)) : null,
+              );
+              
+              await repo.updatePatient(targetPatient.copyWith(
+                records: updatedRecords,
+                paidAmount: targetPatient.paidAmount + paidDiff,
+                remainingAmount: targetPatient.remainingAmount + remainingDiff,
+              ));
           } else {
             // New Appointment session
             await apptRepo.addAppointment(
@@ -344,7 +354,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
                parentId = _findLatestRootRecordId(targetPatient);
             }
             final newRecord = MedicalRecord(
-              id: '',
+              id: const Uuid().v4(),
               date: DateTime.now(),
               diagnosis: '',
               doctorNotes: '',
@@ -354,7 +364,12 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               transactionId: currentTransactionId,
               isFinalized: false,
             );
-            await repo.updatePatient(updatedPatient.copyWith(records: [...targetPatient.records, newRecord]));
+
+            await repo.updatePatient(targetPatient.copyWith(
+              records: [...targetPatient.records, newRecord],
+              paidAmount: targetPatient.paidAmount + totalPaid,
+              remainingAmount: targetPatient.remainingAmount + remaining,
+            ));
           }
         } else {
           // Edit existing session
@@ -372,13 +387,26 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               parentId = null;
             }
 
-            updatedRecords[todayRecordIndex] = updatedRecords[todayRecordIndex].copyWith(
+            final oldRecord = updatedRecords[todayRecordIndex];
+            final paidDiff = totalPaid - oldRecord.paidAmount;
+            final remainingDiff = remaining - oldRecord.remainingAmount;
+
+            updatedRecords[todayRecordIndex] = oldRecord.copyWith(
               paidAmount: totalPaid,
               remainingAmount: remaining,
               transactionId: currentTransactionId,
               parentRecordId: parentId,
             );
-            await repo.updatePatient(updatedPatient.copyWith(records: updatedRecords));
+
+            // Update patient totals with the difference
+            final updatedPaid = targetPatient.paidAmount + paidDiff;
+            final updatedRemaining = targetPatient.remainingAmount + remainingDiff;
+
+            await repo.updatePatient(targetPatient.copyWith(
+              records: updatedRecords,
+              paidAmount: updatedPaid,
+              remainingAmount: updatedRemaining,
+            ));
           } else {
             // Note: If editOnly but no record found, we just update demographics
             await repo.updatePatient(updatedPatient);

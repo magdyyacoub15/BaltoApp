@@ -4,15 +4,6 @@ import '../../auth/presentation/auth_providers.dart';
 import 'appointment.dart';
 import '../../patients/domain/patients_provider.dart';
 import '../../../core/services/polling_service.dart';
-import 'package:appwrite/appwrite.dart';
-import '../../../core/services/appwrite_client.dart';
-
-// ─── Realtime Appointments Notifier (for Dashboard) ───────────────────────────
-// Listens to Appwrite Realtime and maintains a fresh list of appointments.
-// Uses Notifier for robust lifecycle management and immediate local updates.
-class AppointmentsNotifier extends AsyncNotifier<List<Appointment>> {
-  RealtimeSubscription? _subscription;
-  bool _isPolling = true;
 
 // ─── Manual Refresh Trigger ──────────────────────────────────────────────────
 class AppointmentsRefreshNotifier extends Notifier<int> {
@@ -26,12 +17,7 @@ final appointmentsRefreshProvider =
       AppointmentsRefreshNotifier.new,
     );
 
-
 // ─── Appointments Stream Provider ────────────────────────────────────────────
-// Reacts to:
-//   1. appointmentsRefreshProvider increments (local writes on THIS device → immediate)
-//   2. pollingTickProvider (every 5 sec → catches changes from OTHER devices)
-//   3. clinicVisibilityThresholdProvider changes (end-of-day reset)
 final appointmentsStreamProvider =
     StreamProvider<List<Appointment>>((ref) async* {
   final user = await ref.watch(currentUserProvider.future);
@@ -48,7 +34,6 @@ final appointmentsStreamProvider =
   ref.watch(appointmentsRefreshProvider);
   ref.watch(pollingTickProvider);
 
-  // Fetch directly from network — no cache, no checkIsOnline
   final data = await repo.fetchLiveAppointments(clinicId);
   yield _filterAndSort(data, threshold);
 });
@@ -82,7 +67,10 @@ final enrichedAppointmentsProvider =
   final appointments = appointmentsAsync.value;
   final patients = patientsAsync.value;
 
-  if (appointments == null || patients == null) return;
+  if (appointments == null || patients == null) {
+    yield [];
+    return;
+  }
 
   final enriched = appointments.map((app) {
     final patient = patients.cast<dynamic>().firstWhere(
@@ -97,11 +85,13 @@ final enrichedAppointmentsProvider =
 
 // Stats Providers
 final todayAppointmentsCountProvider = Provider<int>((ref) {
-  return ref.watch(appointmentsStreamProvider).value?.length ?? 0;
+  final val = ref.watch(appointmentsStreamProvider).value;
+  return val?.length ?? 0;
 });
 
 final waitingPatientsCountProvider = Provider<int>((ref) {
-  return ref.watch(appointmentsStreamProvider).value?.where((a) => a.isWaiting).length ?? 0;
+  final val = ref.watch(appointmentsStreamProvider).value;
+  return val?.where((a) => a.isWaiting).length ?? 0;
 });
 
 // ─── Date filter for reminders ────────────────────────────────────────────────
@@ -150,3 +140,17 @@ final enrichedUpcomingAppointmentsProvider = FutureProvider<List<Appointment>>((
     return app.copyWith(patient: patient);
   }).toList();
 });
+
+// ─── Local UI State for Dismissed Items ───────────────────────────────────────
+class RemovedAppointmentIdsNotifier extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => {};
+
+  void add(String id) => state = {...state, id};
+  void clear() => state = {};
+}
+
+final removedAppointmentIdsProvider = 
+    NotifierProvider<RemovedAppointmentIdsNotifier, Set<String>>(
+      RemovedAppointmentIdsNotifier.new,
+    );
