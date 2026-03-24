@@ -1,8 +1,11 @@
+import 'package:appwrite/appwrite.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../../core/services/polling_service.dart';
 import 'patient.dart';
+import '../../../core/services/appwrite_client.dart';
 
 // ─── Manual Refresh Trigger for Patients ─────────────────────────────────────
 class PatientsRefreshNotifier extends Notifier<int> {
@@ -43,8 +46,8 @@ class SearchQuery extends Notifier<String> {
   void update(String query) => state = query;
 }
 
-final searchQueryProvider = NotifierProvider<SearchQuery, String>(
-  SearchQuery.new,
+final searchQueryProvider = NotifierProvider<SearchQueryNotifier, String>(
+  SearchQueryNotifier.new,
 );
 
 // Sorting options

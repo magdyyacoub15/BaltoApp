@@ -146,10 +146,14 @@ class AppointmentsListScreen extends ConsumerWidget {
                     title: Text(patientName),
                     subtitle: Text(
                       appt.isWaiting
-                          ? ref.tr('in_queue', [appt.type])
+                          ? ref.tr('in_queue', [ref.tr(appt.type.trim())])
                           : (appt.isCompleted
-                                ? ref.tr('completed_status', [appt.type])
-                                : ref.tr('upcoming_status', [appt.type])),
+                                ? ref.tr('completed_status', [
+                                    ref.tr(appt.type.trim()),
+                                  ])
+                                : ref.tr('upcoming_status', [
+                                    ref.tr(appt.type.trim()),
+                                  ])),
                     ),
                     trailing: appt.isWaiting && !appt.isCompleted
                         ? ElevatedButton(
@@ -300,6 +304,22 @@ class AppointmentsListScreen extends ConsumerWidget {
     final user = ref.read(currentUserProvider).value;
     if (user == null) return;
 
+    final apptRepo = ref.read(appointmentRepositoryProvider);
+    final todayAppts = await apptRepo.getAppointments(
+      user.clinicId,
+      date: DateTime.now(),
+    );
+    if (todayAppts.where((a) => a.patientId == patient.id).isNotEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${patient.name} لديه كشف أو إعادة اليوم بالفعل'),
+          ),
+        );
+      }
+      return;
+    }
+
     final newAppointment = Appointment(
       id: '',
       patientId: patient.id,
@@ -343,6 +363,10 @@ class AppointmentsListScreen extends ConsumerWidget {
       parentRecordId: parentId,
     );
     await patientRepo.addMedicalRecord(patient.id, newRecord);
+
+    // Immediately refresh the dashboard queue
+    ref.invalidate(appointmentsStreamProvider);
+    ref.invalidate(patientsStreamProvider);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

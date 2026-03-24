@@ -1,17 +1,18 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/appointment_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
-import '../domain/appointment.dart';
+import 'appointment.dart';
 import '../../patients/domain/patients_provider.dart';
 import '../../../core/services/polling_service.dart';
 import 'package:appwrite/appwrite.dart';
 import '../../../core/services/appwrite_client.dart';
 
-// ─── Appwrite Realtime Client Provider ───────────────────────────────────────
-final appwriteRealtimeProvider = Provider<Realtime>((ref) {
-  final client = ref.watch(appwriteClientProvider);
-  return Realtime(client);
-});
+// ─── Realtime Appointments Notifier (for Dashboard) ───────────────────────────
+// Listens to Appwrite Realtime and maintains a fresh list of appointments.
+// Uses Notifier for robust lifecycle management and immediate local updates.
+class AppointmentsNotifier extends AsyncNotifier<List<Appointment>> {
+  RealtimeSubscription? _subscription;
+  bool _isPolling = true;
 
 // ─── Manual Refresh Trigger ──────────────────────────────────────────────────
 class AppointmentsRefreshNotifier extends Notifier<int> {
@@ -94,7 +95,7 @@ final enrichedAppointmentsProvider =
   yield enriched;
 });
 
-// ─── Stats derived from data ──────────────────────────────────────────────────
+// Stats Providers
 final todayAppointmentsCountProvider = Provider<int>((ref) {
   return ref.watch(appointmentsStreamProvider).value?.length ?? 0;
 });

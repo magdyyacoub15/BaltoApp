@@ -139,19 +139,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             _addressController.text = '';
           }
 
-          final String prevPaidStr = previousMatch.paidAmount > 0
-              ? previousMatch.paidAmount.toString()
-              : '';
-          if (_paidController.text == prevPaidStr) {
-            _paidController.text = '';
-          }
-
-          final String prevRemStr = previousMatch.remainingAmount > 0
-              ? previousMatch.remainingAmount.toString()
-              : '';
-          if (_remainingController.text == prevRemStr) {
-            _remainingController.text = '';
-          }
+          // paid/remaining were never set from patient match, nothing to clear here.
         }
       });
     }
@@ -212,6 +200,8 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
       String? currentTransactionId;
       final double totalPaid = paid; 
 
+      String newApptId = '';
+
       if (widget.patient == null && _matchedPatient == null) {
         // --- NEW PATIENT ---
         // 1. Create Transaction first to get ID
@@ -223,6 +213,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             type: TransactionType.revenue,
             date: DateTime.now(),
             clinicId: user.clinicId,
+            appointmentId: newApptId.isNotEmpty ? newApptId : null,
           ),
         );
 
@@ -716,7 +707,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               foregroundColor: Colors.white,
             ),
             child: Text(
-              isEditing ? ref.tr('save_changes') : ref.tr('save_patient'),
+              isEditing ? ref.tr('save_changes') : ref.tr('save_patient_visit'),
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           );

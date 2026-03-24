@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:appwrite/appwrite.dart';
 // ignore_for_file: deprecated_member_use
 import 'package:appwrite/models.dart' as models;

@@ -26,6 +26,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       await ref
           .read(authRepositoryProvider)
           .login(_emailController.text.trim(), _passwordController.text);
+      debugPrint('User logged in successfully');
       if (mounted) context.go('/dashboard');
     } catch (e) {
       if (mounted) {

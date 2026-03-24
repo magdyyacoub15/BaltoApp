@@ -1,0 +1,9 @@
+Analyzing 5 items...                                            
+
+   info - 'listDocuments' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.listRows` instead - lib\features\appointments\data\appointment_repository.dart:75:36 - deprecated_member_use
+   info - 'createDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.createRow` instead - lib\features\appointments\data\appointment_repository.dart:157:12 - deprecated_member_use
+   info - 'updateDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.updateRow` instead - lib\features\appointments\data\appointment_repository.dart:196:12 - deprecated_member_use
+   info - 'updateDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.updateRow` instead - lib\features\appointments\data\appointment_repository.dart:226:20 - deprecated_member_use
+   info - 'deleteDocument' is deprecated and shouldn't be used. This API has been deprecated since 1.8.0. Please use `TablesDB.deleteRow` instead - lib\features\appointments\data\appointment_repository.dart:251:22 - deprecated_member_use
+
+5 issues found. (ran in 1.4s)

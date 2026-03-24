@@ -46,6 +46,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               password: _passwordController.text,
               clinicName: _clinicNameController.text.trim(),
             );
+        debugPrint('New admin account created');
         if (mounted) context.go('/dashboard');
       } catch (e) {
         if (mounted) {
