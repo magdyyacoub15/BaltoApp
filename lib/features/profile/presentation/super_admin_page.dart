@@ -20,8 +20,8 @@ class SuperAdminPage extends ConsumerStatefulWidget {
 
 class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
     with SingleTickerProviderStateMixin {
-  List<models.Document> _clinics = [];
-  List<models.Document> _filteredClinics = [];
+  List<models.Row> _clinics = [];
+  List<models.Row> _filteredClinics = [];
   final TextEditingController _searchController = TextEditingController();
   bool _isLoading = true;
   AnimationController? _animationController;
@@ -43,15 +43,15 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
 
   Future<void> _fetchTotalCounts() async {
     try {
-      final databases = ref.read(appwriteDatabasesProvider);
-      final clinicsSnapshot = await databases.listDocuments(
+      final databases = ref.read(appwriteTablesDBProvider);
+      final clinicsSnapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'clinics',
+        tableId: 'clinics',
         queries: [Query.limit(1)],
       );
-      final usersSnapshot = await databases.listDocuments(
+      final usersSnapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'users',
+        tableId: 'users',
         queries: [Query.limit(1)],
       );
 
@@ -69,17 +69,17 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
   Future<void> _fetchClinics({bool showLoading = true}) async {
     if (showLoading) setState(() => _isLoading = true);
     try {
-      final databases = ref.read(appwriteDatabasesProvider);
-      final snapshot = await databases.listDocuments(
+      final databases = ref.read(appwriteTablesDBProvider);
+      final snapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'clinics',
+        tableId: 'clinics',
         queries: [Query.orderDesc('createdAt')],
       );
 
       if (mounted) {
         setState(() {
-          _clinics = snapshot.documents;
-          _filteredClinics = snapshot.documents;
+          _clinics = snapshot.rows;
+          _filteredClinics = snapshot.rows;
           _isLoading = false;
         });
         _onSearchChanged(_searchController.text);
@@ -629,7 +629,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
 
       int currentStep = 0;
       final totalSteps = subcollections.length + 1;
-      final databases = ref.read(appwriteDatabasesProvider);
+      final databases = ref.read(appwriteTablesDBProvider);
 
       // 1. Delete Patients
       currentStep++;
@@ -640,18 +640,18 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
         ]),
       );
 
-      final patientsSnapshot = await databases.listDocuments(
+      final patientsSnapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'patients',
+        tableId: 'patients',
         queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
       );
 
       int deletedPatients = 0;
-      for (var patient in patientsSnapshot.documents) {
-        await databases.deleteDocument(
+      for (var patient in patientsSnapshot.rows) {
+        await databases.deleteRow(
           databaseId: appwriteDatabaseId,
-          collectionId: 'patients',
-          documentId: patient.$id,
+          tableId: 'patients',
+          rowId: patient.$id,
         );
         deletedPatients++;
         onProgress(
@@ -667,16 +667,16 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           totalSteps.toString(),
         ]),
       );
-      final appointmentsSnapshot = await databases.listDocuments(
+      final appointmentsSnapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'appointments',
+        tableId: 'appointments',
         queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
       );
-      for (var doc in appointmentsSnapshot.documents) {
-        await databases.deleteDocument(
+      for (var doc in appointmentsSnapshot.rows) {
+        await databases.deleteRow(
           databaseId: appwriteDatabaseId,
-          collectionId: 'appointments',
-          documentId: doc.$id,
+          tableId: 'appointments',
+          rowId: doc.$id,
         );
       }
 
@@ -688,16 +688,16 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           totalSteps.toString(),
         ]),
       );
-      final expensesSnapshot = await databases.listDocuments(
+      final expensesSnapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'transactions',
+        tableId: 'transactions',
         queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
       );
-      for (var doc in expensesSnapshot.documents) {
-        await databases.deleteDocument(
+      for (var doc in expensesSnapshot.rows) {
+        await databases.deleteRow(
           databaseId: appwriteDatabaseId,
-          collectionId: 'transactions',
-          documentId: doc.$id,
+          tableId: 'transactions',
+          rowId: doc.$id,
         );
       }
 
@@ -709,17 +709,17 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           totalSteps.toString(),
         ]),
       );
-      final usersSnapshot = await databases.listDocuments(
+      final usersSnapshot = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'users',
+        tableId: 'users',
         queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
       );
-      for (var user in usersSnapshot.documents) {
+      for (var user in usersSnapshot.rows) {
         // Here we just mark them as unapproved and remove clinicId if possible
-        await databases.updateDocument(
+        await databases.updateRow(
           databaseId: appwriteDatabaseId,
-          collectionId: 'users',
-          documentId: user.$id,
+          tableId: 'users',
+          rowId: user.$id,
           data: {'clinicId': '', 'isApproved': false},
         );
       }
@@ -738,10 +738,10 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
           .deleteStorageFolder('clinics/$clinicId');
 
       // 6. Delete Clinic Document
-      await databases.deleteDocument(
+      await databases.deleteRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'clinics',
-        documentId: clinicId,
+        tableId: 'clinics',
+        rowId: clinicId,
       );
 
       if (mounted) {

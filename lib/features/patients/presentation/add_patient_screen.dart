@@ -6,20 +6,28 @@ import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../appointments/domain/appointment.dart';
 import '../../appointments/data/appointment_repository.dart';
+import '../../appointments/domain/appointments_provider.dart';
+import '../domain/patients_provider.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/localization/language_provider.dart';
 import '../../accounts/domain/transaction.dart';
 import '../../accounts/data/transaction_repository.dart';
+import '../../accounts/domain/accounts_provider.dart';
 import '../domain/models/medical_record.dart';
 
 class AddPatientScreen extends ConsumerStatefulWidget {
   final Patient? patient;
+  final Appointment? appointment;
   final bool isReExamination;
+  /// When true, only edits patient info — does NOT add a new appointment or medical record.
+  final bool editOnly;
 
   const AddPatientScreen({
     super.key,
     this.patient,
+    this.appointment,
     this.isReExamination = false,
+    this.editOnly = false,
   });
 
   @override
@@ -45,21 +53,33 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
   @override
   void initState() {
     super.initState();
-    _examType = widget.isReExamination ? 're_examination' : 'new_examination';
+    _examType = widget.appointment?.type ??
+        (widget.isReExamination ? 're_examination' : 'new_examination');
     _nameController = TextEditingController(text: widget.patient?.name);
     _phoneController = TextEditingController(text: widget.patient?.phone);
     _dateOfBirth = widget.patient?.dateOfBirth;
     _addressController = TextEditingController(text: widget.patient?.address);
+    // Find relevant record for this session
+    MedicalRecord? todayRecord;
+    if (widget.patient != null) {
+      final searchDate = widget.appointment?.date ?? DateTime.now();
+      try {
+        todayRecord = widget.patient!.records.firstWhere((r) =>
+            r.date.year == searchDate.year &&
+            r.date.month == searchDate.month &&
+            r.date.day == searchDate.day &&
+            !r.isFinalized);
+      } catch (_) {}
+    }
+
     _paidController = TextEditingController(
-      text: widget.patient?.paidAmount != null && widget.patient!.paidAmount > 0
-          ? widget.patient!.paidAmount.toString()
+      text: todayRecord != null && todayRecord.paidAmount > 0
+          ? todayRecord.paidAmount.toString()
           : '',
     );
     _remainingController = TextEditingController(
-      text:
-          widget.patient?.remainingAmount != null &&
-              widget.patient!.remainingAmount > 0
-          ? widget.patient!.remainingAmount.toString()
+      text: todayRecord != null && todayRecord.remainingAmount > 0
+          ? todayRecord.remainingAmount.toString()
           : '',
     );
     _nameController.addListener(_onNameChanged);
@@ -106,22 +126,8 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
                   _addressController.text == previousMatch.address)) {
             _addressController.text = match.address;
           }
-          if (_paidController.text.isEmpty ||
-              (previousMatch != null &&
-                  _paidController.text ==
-                      previousMatch.paidAmount.toString())) {
-            _paidController.text = match.paidAmount > 0
-                ? match.paidAmount.toString()
-                : '';
-          }
-          if (_remainingController.text.isEmpty ||
-              (previousMatch != null &&
-                  _remainingController.text ==
-                      previousMatch.remainingAmount.toString())) {
-            _remainingController.text = match.remainingAmount > 0
-                ? match.remainingAmount.toString()
-                : '';
-          }
+          // Remove pre-filling of financial amounts for matched existing patients
+          // Each visit should start with empty/fresh payment inputs
         } else if (previousMatch != null) {
           if (_phoneController.text == previousMatch.phone) {
             _phoneController.text = '';
@@ -179,9 +185,9 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_dateOfBirth == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(ref.tr('invalid_dob'))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ref.tr('invalid_dob'))),
+      );
       return;
     }
 
@@ -191,142 +197,230 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
     setState(() => _isLoading = true);
     try {
       final repo = ref.read(patientRepositoryProvider);
+      final apptRepo = ref.read(appointmentRepositoryProvider);
+      final transactionRepo = ref.read(transactionRepositoryProvider);
+      
       String patientId = widget.patient?.id ?? '';
-      Patient patientToSave;
-
+      
       final double paid = double.tryParse(_paidController.text) ?? 0.0;
-      final double remaining =
-          double.tryParse(_remainingController.text) ?? 0.0;
+      final double remaining = double.tryParse(_remainingController.text) ?? 0.0;
+
+      double oldPaidAmount = 0.0;
+      int todayRecordIndex = -1;
+
+      // --- FINANCIAL TRANSACTION & RECORD SAVE ---
+      String? currentTransactionId;
+      final double totalPaid = paid; 
 
       if (widget.patient == null && _matchedPatient == null) {
-        // Adding brand new patient
-        patientToSave = Patient(
-          id: '',
-          name: _nameController.text.trim(),
-          phone: _phoneController.text.trim(),
-          dateOfBirth: _dateOfBirth!,
-          address: _addressController.text.trim(),
-          paidAmount: paid,
-          remainingAmount: remaining,
-          clinicId: user.clinicId,
-          lastVisit: DateTime.now(),
-          records: [],
-        );
-        patientId = await repo.addPatient(patientToSave);
-
-        // Add Appointment
-        final apptRepo = ref.read(appointmentRepositoryProvider);
-        await apptRepo.addAppointment(
-          Appointment(
-            id: '',
-            patientId: patientId,
-            date: DateTime.now(),
-            type: _examType,
-            clinicId: user.clinicId,
-            isWaiting: true,
-            isManual: true,
-          ),
-        );
-
-        // Initial Medical Record
-        await repo.addMedicalRecord(
-          patientId,
-          MedicalRecord(
-            id: '',
-            date: DateTime.now(),
-            diagnosis: '',
-            doctorNotes: '',
-            paidAmount: paid,
-            remainingAmount: remaining,
-          ),
-        );
-      } else {
-        // Editing existing patient or using smart-detected one
-        final targetPatient = widget.patient ?? _matchedPatient!;
-        patientId = targetPatient.id;
-
-        patientToSave = targetPatient.copyWith(
-          name: _nameController.text.trim(),
-          phone: _phoneController.text.trim(),
-          dateOfBirth: _dateOfBirth!,
-          address: _addressController.text.trim(),
-          paidAmount: (widget.patient != null)
-              ? paid
-              : (targetPatient.paidAmount + paid),
-          remainingAmount: remaining,
-        );
-        await repo.updatePatient(patientToSave);
-
-        // Add Appointment for current session
-        final apptRepo = ref.read(appointmentRepositoryProvider);
-        await apptRepo.addAppointment(
-          Appointment(
-            id: '',
-            patientId: patientId,
-            date: DateTime.now(),
-            type: _examType,
-            clinicId: user.clinicId,
-            isWaiting: true,
-            isManual: true,
-          ),
-        );
-
-        // Create Medical Record / Follow-up
-        String? parentId;
-        if (_examType == 're_examination') {
-          final mainRecords = targetPatient.records
-              .where((r) => r.parentRecordId == null)
-              .toList();
-          if (mainRecords.isNotEmpty) {
-            mainRecords.sort((a, b) => b.date.compareTo(a.date));
-            parentId = mainRecords.first.id;
-          }
-        }
-
-        await repo.addMedicalRecord(
-          patientId,
-          MedicalRecord(
-            id: '',
-            date: DateTime.now(),
-            diagnosis: '',
-            doctorNotes: '',
-            paidAmount: paid,
-            remainingAmount: remaining,
-            parentRecordId: parentId,
-          ),
-        );
-      }
-
-      // Financial Transaction
-      if (paid > 0) {
-        final transactionRepo = ref.read(transactionRepositoryProvider);
-        await transactionRepo.addTransaction(
+        // --- NEW PATIENT ---
+        // 1. Create Transaction first to get ID
+        currentTransactionId = await transactionRepo.addTransaction(
           AppTransaction(
             id: '',
-            amount: paid,
-            description: ref.tr('examine_patient', [patientToSave.name]),
+            amount: totalPaid,
+            description: ref.tr('examine_patient', [_nameController.text.trim()]),
             type: TransactionType.revenue,
             date: DateTime.now(),
             clinicId: user.clinicId,
           ),
         );
+
+        final newPatient = Patient(
+          id: '',
+          name: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          dateOfBirth: _dateOfBirth!,
+          address: _addressController.text.trim(),
+          paidAmount: totalPaid,
+          remainingAmount: remaining,
+          clinicId: user.clinicId,
+          lastVisit: DateTime.now(),
+          records: [
+            MedicalRecord(
+              id: '',
+              date: DateTime.now(),
+              diagnosis: '',
+              doctorNotes: '',
+              paidAmount: totalPaid,
+              remainingAmount: remaining,
+              transactionId: currentTransactionId,
+            )
+          ],
+        );
+        patientId = await repo.addPatient(newPatient);
+
+        await apptRepo.addAppointment(
+          Appointment(
+            id: '',
+            patientId: patientId,
+            date: DateTime.now(),
+            type: _examType,
+            clinicId: user.clinicId,
+            isWaiting: true,
+            isManual: true,
+          ),
+        );
+      } else {
+        // --- EXISTING PATIENT ---
+        final targetPatient = widget.patient ?? _matchedPatient!;
+        patientId = targetPatient.id;
+
+        final searchDate = widget.appointment?.date ?? DateTime.now();
+        todayRecordIndex = targetPatient.records.indexWhere((r) => 
+            r.date.year == searchDate.year &&
+            r.date.month == searchDate.month &&
+            r.date.day == searchDate.day &&
+            !r.isFinalized);
+        
+        MedicalRecord? activeRecord;
+        if (todayRecordIndex != -1) {
+          activeRecord = targetPatient.records[todayRecordIndex];
+          oldPaidAmount = activeRecord.paidAmount;
+          currentTransactionId = activeRecord.transactionId;
+        }
+
+        // Handle Transaction (Add or Update)
+        if (currentTransactionId != null) {
+          // Update existing transaction
+          await transactionRepo.updateTransaction(
+            currentTransactionId,
+            AppTransaction(
+              id: currentTransactionId,
+              amount: totalPaid,
+              description: ref.tr('examine_patient', [_nameController.text.trim()]),
+              type: TransactionType.revenue,
+              date: activeRecord?.date ?? DateTime.now(),
+              clinicId: user.clinicId,
+            ),
+          );
+        } else if (totalPaid != 0) {
+          // Create new transaction for this record (either stay empty or legacy)
+          currentTransactionId = await transactionRepo.addTransaction(
+            AppTransaction(
+              id: '',
+              amount: totalPaid,
+              description: ref.tr('examine_patient', [_nameController.text.trim()]),
+              type: TransactionType.revenue,
+              date: activeRecord?.date ?? DateTime.now(),
+              clinicId: user.clinicId,
+            ),
+          );
+        }
+
+        // Prepare updated patient
+        final updatedPatient = targetPatient.copyWith(
+          name: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          dateOfBirth: _dateOfBirth!,
+          address: _addressController.text.trim(),
+          paidAmount: (targetPatient.paidAmount - oldPaidAmount) + totalPaid,
+          remainingAmount: (targetPatient.remainingAmount - (activeRecord?.remainingAmount ?? 0)) + remaining,
+        );
+
+        if (!widget.editOnly) {
+          // Check if patient already has a non-finalized record today (avoid duplicates)
+          final existingNonFinalizedIndex = targetPatient.records.indexWhere((r) => !r.isFinalized);
+
+          if (existingNonFinalizedIndex != -1) {
+            // Update existing record (e.g., if re-adding from queue to change type)
+             final updatedRecords = List<MedicalRecord>.from(targetPatient.records);
+             updatedRecords[existingNonFinalizedIndex] = updatedRecords[existingNonFinalizedIndex].copyWith(
+               paidAmount: totalPaid,
+               remainingAmount: remaining,
+               transactionId: currentTransactionId,
+               // Update parent if it's now a re-examination and didn't have one
+               parentRecordId: _examType == 're_examination' ? (updatedRecords[existingNonFinalizedIndex].parentRecordId ?? _findLatestRootRecordId(targetPatient)) : null,
+             );
+             await repo.updatePatient(updatedPatient.copyWith(records: updatedRecords));
+          } else {
+            // New Appointment session
+            await apptRepo.addAppointment(
+              Appointment(
+                id: '',
+                patientId: patientId,
+                date: DateTime.now(),
+                type: _examType,
+                clinicId: user.clinicId,
+                isWaiting: true,
+                isManual: true,
+              ),
+            );
+
+            // Create Medical Record
+            String? parentId;
+            if (_examType == 're_examination') {
+               parentId = _findLatestRootRecordId(targetPatient);
+            }
+            final newRecord = MedicalRecord(
+              id: '',
+              date: DateTime.now(),
+              diagnosis: '',
+              doctorNotes: '',
+              paidAmount: totalPaid,
+              remainingAmount: remaining,
+              parentRecordId: parentId,
+              transactionId: currentTransactionId,
+              isFinalized: false,
+            );
+            await repo.updatePatient(updatedPatient.copyWith(records: [...targetPatient.records, newRecord]));
+          }
+        } else {
+          // Edit existing session
+          if (widget.appointment != null && widget.appointment!.type != _examType) {
+            await apptRepo.updateAppointment(widget.appointment!.copyWith(type: _examType));
+          }
+
+          if (todayRecordIndex != -1) {
+            final updatedRecords = List<MedicalRecord>.from(targetPatient.records);
+            // When editing, ensure we maintain/update parent if type changed to re-examination
+            String? parentId = updatedRecords[todayRecordIndex].parentRecordId;
+            if (_examType == 're_examination' && parentId == null) {
+              parentId = _findLatestRootRecordId(targetPatient);
+            } else if (_examType == 'new_examination') {
+              parentId = null;
+            }
+
+            updatedRecords[todayRecordIndex] = updatedRecords[todayRecordIndex].copyWith(
+              paidAmount: totalPaid,
+              remainingAmount: remaining,
+              transactionId: currentTransactionId,
+              parentRecordId: parentId,
+            );
+            await repo.updatePatient(updatedPatient.copyWith(records: updatedRecords));
+          } else {
+            // Note: If editOnly but no record found, we just update demographics
+            await repo.updatePatient(updatedPatient);
+          }
+        }
       }
 
+      // --- REFRESH ---
+      ref.read(patientsRefreshProvider.notifier).refresh();
+      ref.read(appointmentsRefreshProvider.notifier).refresh();
+      ref.read(transactionsRefreshProvider.notifier).refresh();
+
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(ref.tr('save_success'))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ref.tr('save_success'))));
         Navigator.pop(context);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('${ref.tr('save_error')}: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${ref.tr('save_error')}: $e')));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String? _findLatestRootRecordId(Patient patient) {
+    // Only records with null parent are "main" examinations
+    final mainRecords = patient.records.where((r) => r.parentRecordId == null).toList();
+    if (mainRecords.isNotEmpty) {
+      mainRecords.sort((a, b) => b.date.compareTo(a.date));
+      return mainRecords.first.id;
+    }
+    return null;
   }
 
   @override

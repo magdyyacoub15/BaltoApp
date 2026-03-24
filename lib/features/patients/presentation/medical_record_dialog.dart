@@ -164,9 +164,9 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
-        final url = await imgbbService.uploadImage(_visitImages[i]);
-        if (url != null) {
-          uploadedUrls.add(url);
+        final result = await imgbbService.uploadImage(_visitImages[i]);
+        if (result != null) {
+          uploadedUrls.add(result.url);
         }
       } catch (e) {
         debugPrint('Error uploading image $i: $e');

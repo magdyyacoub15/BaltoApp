@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../domain/models/medical_record.dart';
 import '../domain/models/prescription.dart';
 import '../domain/patients_provider.dart';
@@ -16,6 +17,7 @@ import '../data/prescription_service.dart';
 import '../domain/patient.dart';
 import '../domain/clinic_medications_provider.dart';
 import '../../appointments/data/appointment_repository.dart';
+import '../../accounts/domain/accounts_provider.dart';
 import '../../appointments/domain/appointments_provider.dart';
 import '../../../core/services/imgbb_service.dart';
 
@@ -177,9 +179,9 @@ class _AddMedicalRecordScreenState
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
-        final url = await imgbbService.uploadImage(_visitImages[i]);
-        if (url != null) {
-          uploadedUrls.add(url);
+        final result = await imgbbService.uploadImage(_visitImages[i]);
+        if (result != null) {
+          uploadedUrls.add(result.url);
         } else {
           debugPrint('ImgBB Error index $i: Upload failed');
         }
@@ -307,6 +309,35 @@ class _AddMedicalRecordScreenState
 
       final paid = double.tryParse(_paidController.text) ?? 0.0;
       final remaining = double.tryParse(_remainingController.text) ?? 0.0;
+      
+      final transactionRepo = ref.read(transactionRepositoryProvider);
+      String? currentTransactionId = widget.initialRecord?.transactionId;
+
+      // Handle Transaction sync
+      if (currentTransactionId != null) {
+        await transactionRepo.updateTransaction(
+          currentTransactionId,
+          AppTransaction(
+            id: currentTransactionId,
+            amount: paid,
+            description: ref.tr('patient_visit', [patient.name]),
+            type: TransactionType.revenue,
+            date: widget.initialRecord?.date ?? DateTime.now(),
+            clinicId: user.clinicId,
+          ),
+        );
+      } else if (paid != 0) {
+        currentTransactionId = await transactionRepo.addTransaction(
+          AppTransaction(
+            id: '',
+            amount: paid,
+            description: ref.tr('patient_visit', [patient.name]),
+            type: TransactionType.revenue,
+            date: widget.initialRecord?.date ?? DateTime.now(),
+            clinicId: user.clinicId,
+          ),
+        );
+      }
 
       final newRecord = MedicalRecord(
         id: widget.initialRecord?.id ?? const Uuid().v4(),
@@ -317,6 +348,7 @@ class _AddMedicalRecordScreenState
         paidAmount: paid,
         remainingAmount: remaining,
         attachmentUrls: currentAttachments,
+        transactionId: currentTransactionId,
         isFinalized: true, // Mark as finalized upon saving
         vitalSigns: VitalSigns(
           bloodPressure: _bpController.text.trim(),
@@ -354,26 +386,8 @@ class _AddMedicalRecordScreenState
       );
 
       await repo.updatePatient(updatedPatient);
-
-      // Record transaction if payment changed or is new
-      if (paid > 0 &&
-          (widget.initialRecord == null ||
-              paid != widget.initialRecord!.paidAmount)) {
-        final transactionRepo = ref.read(transactionRepositoryProvider);
-        final revenue = AppTransaction(
-          id: '',
-          amount: widget.initialRecord != null
-              ? (paid - widget.initialRecord!.paidAmount)
-              : paid,
-          description: widget.initialRecord != null
-              ? ref.tr('edit_payment_for_patient', [patient.name])
-              : ref.tr('patient_visit', [patient.name]),
-          type: TransactionType.revenue,
-          date: DateTime.now(),
-          clinicId: user.clinicId,
-        );
-        await transactionRepo.addTransaction(revenue);
-      }
+      // Force finance UI refresh
+      ref.read(transactionsRefreshProvider.notifier).refresh();
 
       // Find the active appointment and mark it as completed
       final apptRepo = ref.read(appointmentRepositoryProvider);
@@ -386,6 +400,8 @@ class _AddMedicalRecordScreenState
           await apptRepo.updateAppointment(
             activeAppt.copyWith(isCompleted: true, isWaiting: false),
           );
+          // Force immediate appointments UI refresh
+          ref.read(appointmentsRefreshProvider.notifier).refresh();
         }
       } catch (_) {
         // StateError is thrown by firstWhere if no element is found, we just ignore it
@@ -911,11 +927,23 @@ class _AddMedicalRecordScreenState
                 final index = entry.key;
                 final url = entry.value;
                 return _buildImageItem(
-                  child: Image.network(
-                    url,
+                  child: CachedNetworkImage(
+                    imageUrl: url,
                     fit: BoxFit.cover,
                     width: 120,
                     height: 120,
+                    placeholder: (context, url) => Container(
+                      width: 120,
+                      height: 120,
+                      color: Colors.grey.shade200,
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
+                    errorWidget: (context, url, error) => Container(
+                      width: 120,
+                      height: 120,
+                      color: Colors.grey.shade200,
+                      child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                    ),
                   ),
                   onRemove: () => setState(() => _existingUrls.removeAt(index)),
                 );

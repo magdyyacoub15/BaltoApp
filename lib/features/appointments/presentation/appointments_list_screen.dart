@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../domain/appointment.dart';
 import '../data/appointment_repository.dart';
+import '../domain/appointments_provider.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../patients/domain/patients_provider.dart';
 import '../../patients/domain/models/medical_record.dart';
@@ -311,6 +312,8 @@ class AppointmentsListScreen extends ConsumerWidget {
     await ref
         .read(appointmentRepositoryProvider)
         .addAppointment(newAppointment);
+    // Force immediate UI refresh
+    ref.read(appointmentsRefreshProvider.notifier).refresh();
 
     // Create an unfinalized MedicalRecord for the current visit
     final patientRepo = ref.read(patientRepositoryProvider);

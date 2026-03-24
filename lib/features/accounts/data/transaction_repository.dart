@@ -6,19 +6,22 @@ import '../domain/transaction.dart';
 import '../../../core/services/appwrite_client.dart';
 import '../../../core/services/hive_cache_service.dart';
 import '../../../core/services/connectivity_service.dart';
+import '../../../core/services/offline_queue_service.dart';
 
 final transactionRepositoryProvider = Provider(
   (ref) => TransactionRepository(
-    ref.read(appwriteDatabasesProvider),
+    ref.read(appwriteTablesDBProvider),
     ref.read(hiveCacheServiceProvider),
+    ref.read(offlineQueueServiceProvider),
   ),
 );
 
 class TransactionRepository {
-  final Databases _databases;
+  final TablesDB _databases;
   final HiveCacheService _cache;
+  final OfflineQueueService _queue;
 
-  TransactionRepository(this._databases, this._cache);
+  TransactionRepository(this._databases, this._cache, this._queue);
 
   /// Cache-First: returns cached transactions instantly, refreshes in background.
   Future<List<AppTransaction>> getTransactions(String clinicId) async {
@@ -32,6 +35,48 @@ class TransactionRepository {
       return list;
     }
     return _fetchAndCache(clinicId);
+  }
+
+  /// Network-only: always fetches from server, ignores cache check.
+  /// Used by the dashboard for real-time accuracy.
+  Future<List<AppTransaction>> fetchLiveTransactions(String clinicId) async {
+    try {
+      final List<AppTransaction> all = [];
+      int offset = 0;
+      const int batchSize = 100;
+
+      while (true) {
+        final res = await _databases.listRows(
+          databaseId: appwriteDatabaseId,
+          tableId: 'transactions',
+          queries: [
+            Query.equal('clinicId', clinicId),
+            Query.limit(batchSize),
+            Query.offset(offset),
+          ],
+        );
+        final batch = res.rows
+            .map((doc) => AppTransaction.fromMap(doc.data, doc.$id));
+        all.addAll(batch);
+        if (res.rows.length < batchSize) break;
+        offset += batchSize;
+      }
+
+      // Update cache with fresh data
+      _cache.cacheTransactions(
+        clinicId,
+        all.map((t) => {...t.toMap(), 'id': t.id}).toList(),
+      );
+
+      all.sort((a, b) => b.date.compareTo(a.date));
+      return all;
+    } catch (e, st) {
+      debugPrint('❌ [TransactionRepository] fetchLive error: $e\n$st');
+      if (e is AppwriteException || e.toString().contains('SocketException')) {
+        throw Exception('لا يوجد اتصال بالإنترنت. الصفحة الرئيسية تعمل فقط عند الاتصال بالشبكة.');
+      }
+      rethrow;
+    }
   }
 
   Future<List<AppTransaction>> refreshTransactions(String clinicId) async {
@@ -59,23 +104,35 @@ class TransactionRepository {
         return list;
       }
 
-      final res = await _databases.listDocuments(
-        databaseId: appwriteDatabaseId,
-        collectionId: 'transactions',
-        queries: [Query.equal('clinicId', clinicId), Query.limit(500)],
-      );
+      // Paginated fetch — no hard limit
+      final List<AppTransaction> all = [];
+      int offset = 0;
+      const int batchSize = 100;
 
-      final list = res.documents
-          .map((doc) => AppTransaction.fromMap(doc.data, doc.$id))
-          .toList();
+      while (true) {
+        final res = await _databases.listRows(
+          databaseId: appwriteDatabaseId,
+          tableId: 'transactions',
+          queries: [
+            Query.equal('clinicId', clinicId),
+            Query.limit(batchSize),
+            Query.offset(offset),
+          ],
+        );
+        final batch = res.rows
+            .map((doc) => AppTransaction.fromMap(doc.data, doc.$id));
+        all.addAll(batch);
+        if (res.rows.length < batchSize) break;
+        offset += batchSize;
+      }
 
       _cache.cacheTransactions(
         clinicId,
-        list.map((t) => {...t.toMap(), 'id': t.id}).toList(),
+        all.map((t) => {...t.toMap(), 'id': t.id}).toList(),
       );
 
-      list.sort((a, b) => b.date.compareTo(a.date));
-      return list;
+      all.sort((a, b) => b.date.compareTo(a.date));
+      return all;
     } catch (_) {
       final cached = _cache.getCachedTransactions(clinicId);
       final list =
@@ -88,22 +145,112 @@ class TransactionRepository {
     }
   }
 
-  Future<void> addTransaction(AppTransaction transaction) async {
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'transactions',
-      documentId: ID.unique(),
-      data: transaction.toMap(),
+  // ─── Offline-aware Writes ──────────────────────────────────────────────────
+
+  Future<String> addTransaction(AppTransaction transaction) async {
+    final docId = ID.unique();
+    final data = transaction.toMap();
+    final isOnline = await checkIsOnline();
+
+    if (isOnline) {
+      try {
+        await _databases.createRow(
+          databaseId: appwriteDatabaseId,
+          tableId: 'transactions',
+          rowId: docId,
+          data: data,
+        );
+        _refreshInBackground(transaction.clinicId);
+        return docId;
+      } catch (_) {
+        // fall through to offline path
+      }
+    }
+
+    // Offline: apply to cache optimistically + enqueue
+    final cached = _cache.getCachedTransactions(transaction.clinicId) ?? [];
+    _cache.cacheTransactions(transaction.clinicId, [
+      ...cached,
+      {...data, 'id': docId},
+    ]);
+    _queue.enqueue(
+      table: 'transactions',
+      operation: 'create',
+      rowId: docId,
+      data: data,
+      clinicId: transaction.clinicId,
     );
-    _refreshInBackground(transaction.clinicId);
+    debugPrint('📥 [TransactionRepo] addTransaction queued offline: $docId');
+    return docId;
+  }
+
+  Future<void> updateTransaction(String id, AppTransaction transaction) async {
+    final data = transaction.toMap();
+    final isOnline = await checkIsOnline();
+
+    if (isOnline) {
+      try {
+        await _databases.updateRow(
+          databaseId: appwriteDatabaseId,
+          tableId: 'transactions',
+          rowId: id,
+          data: data,
+        );
+        _refreshInBackground(transaction.clinicId);
+        return;
+      } catch (_) {
+        // fall through to offline path
+      }
+    }
+
+    // Offline: apply to cache optimistically + enqueue
+    final cached = _cache.getCachedTransactions(transaction.clinicId) ?? [];
+    final index = cached.indexWhere((m) => m['id'] == id);
+    if (index != -1) {
+      cached[index] = {...data, 'id': id};
+      _cache.cacheTransactions(transaction.clinicId, cached);
+    }
+    
+    _queue.enqueue(
+      table: 'transactions',
+      operation: 'update',
+      rowId: id,
+      data: data,
+      clinicId: transaction.clinicId,
+    );
+    debugPrint('📥 [TransactionRepo] updateTransaction queued offline: $id');
   }
 
   Future<void> deleteTransaction(String id, String clinicId) async {
-    await _databases.deleteDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'transactions',
-      documentId: id,
+    final isOnline = await checkIsOnline();
+
+    if (isOnline) {
+      try {
+        await _databases.deleteRow(
+          databaseId: appwriteDatabaseId,
+          tableId: 'transactions',
+          rowId: id,
+        );
+        _refreshInBackground(clinicId);
+        return;
+      } catch (_) {
+        // fall through to offline path
+      }
+    }
+
+    // Offline: remove from cache + enqueue
+    final cached = _cache.getCachedTransactions(clinicId) ?? [];
+    _cache.cacheTransactions(
+      clinicId,
+      cached.where((m) => m['id'] != id).toList(),
     );
-    _refreshInBackground(clinicId);
+    _queue.enqueue(
+      table: 'transactions',
+      operation: 'delete',
+      rowId: id,
+      data: {},
+      clinicId: clinicId,
+    );
+    debugPrint('📥 [TransactionRepo] deleteTransaction queued offline: $id');
   }
 }

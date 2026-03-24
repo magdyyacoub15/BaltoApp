@@ -12,13 +12,13 @@ import '../domain/models/clinic_membership.dart';
 
 final authRepositoryProvider = Provider((ref) {
   final account = ref.watch(appwriteAccountProvider);
-  final databases = ref.watch(appwriteDatabasesProvider);
+  final databases = ref.watch(appwriteTablesDBProvider);
   return AuthRepository(account, databases);
 });
 
 class AuthRepository {
   final Account _account;
-  final Databases _databases;
+  final TablesDB _databases;
   final _authStateController = StreamController<models.User?>.broadcast();
 
   AuthRepository(this._account, this._databases) {
@@ -26,10 +26,13 @@ class AuthRepository {
   }
 
   void _initAuthState() async {
+    debugPrint('🔄 [Auth] _initAuthState() — checking current session');
     try {
       final user = await _account.get();
+      debugPrint('✅ [Auth] Session found — userId=${user.$id}, email=${user.email}');
       if (!_authStateController.isClosed) _authStateController.add(user);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('ℹ️ [Auth] No active session: $e');
       if (!_authStateController.isClosed) _authStateController.add(null);
     }
   }
@@ -39,10 +42,10 @@ class AuthRepository {
   // Get current AppUser data
   Future<AppUser?> getUserData(String uid) async {
     try {
-      final doc = await _databases.getDocument(
+      final doc = await _databases.getRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'users',
-        documentId: uid,
+        tableId: 'users',
+        rowId: uid,
       );
       return AppUser.fromMap(doc.data, doc.$id);
     } catch (e) {
@@ -53,10 +56,10 @@ class AuthRepository {
   // Get Clinic details
   Future<ClinicGroup?> getClinicData(String clinicId) async {
     try {
-      final doc = await _databases.getDocument(
+      final doc = await _databases.getRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'clinics',
-        documentId: clinicId,
+        tableId: 'clinics',
+        rowId: clinicId,
       );
       return ClinicGroup.fromMap(doc.data, doc.$id);
     } catch (e) {
@@ -66,21 +69,37 @@ class AuthRepository {
 
   // Manual Shift Reset
   Future<void> resetShift(String clinicId) async {
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinicId,
+      tableId: 'clinics',
+      rowId: clinicId,
       data: {'lastShiftReset': DateTime.now().toIso8601String()},
     );
   }
 
   Future<void> login(String email, String password) async {
-    await _account.createEmailPasswordSession(email: email, password: password);
+    debugPrint('▶ [Auth] login() — email=$email');
+    // Delete any existing session first to avoid user_session_already_exists error
+    try {
+      await _account.deleteSession(sessionId: 'current');
+      debugPrint('ℹ️ [Auth] login — cleared existing session');
+    } catch (_) {
+      // No active session, that's fine
+    }
+    try {
+      await _account.createEmailPasswordSession(email: email, password: password);
+      debugPrint('✅ [Auth] createEmailPasswordSession succeeded');
+    } catch (e) {
+      debugPrint('❌ [Auth] login createEmailPasswordSession failed: $e');
+      rethrow;
+    }
     // Emit updated user after successful login
     try {
       final user = await _account.get();
+      debugPrint('✅ [Auth] login — got user: ${user.$id}');
       if (!_authStateController.isClosed) _authStateController.add(user);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('⚠️ [Auth] login — could not get user after session: $e');
       if (!_authStateController.isClosed) _authStateController.add(null);
     }
   }
@@ -108,33 +127,51 @@ class AuthRepository {
     required String password,
     required String clinicName,
   }) async {
+    debugPrint('▶ [Auth] signUpAsAdmin() — email=$email, clinicName=$clinicName');
+
     // 1. Create Auth User
-    final user = await _account.create(
-      userId: ID.unique(),
-      email: email,
-      password: password,
-      name: name,
-    );
-    final uid = user.$id;
+    late final String uid;
+    try {
+      final user = await _account.create(
+        userId: ID.unique(),
+        email: email,
+        password: password,
+        name: name,
+      );
+      uid = user.$id;
+      debugPrint('✅ [Auth] signUpAsAdmin — auth user created: uid=$uid');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsAdmin — account.create failed: $e');
+      rethrow;
+    }
 
     // 2. Generate unique Clinic Code
     final clinicCode = _generateRandomCode(6);
+    debugPrint('🔑 [Auth] signUpAsAdmin — generated clinicCode=$clinicCode');
 
     // 3. Create Clinic Document with 60-day Trial
     final trialEndDate = DateTime.now().add(const Duration(days: 60));
-    final clinicDoc = await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: ID.unique(),
-      data: {
-        'name': clinicName,
-        'clinicCode': clinicCode,
-        'adminId': uid,
-        'createdAt': DateTime.now().toIso8601String(),
-        'subscriptionEndDate': trialEndDate.toIso8601String(),
-        'isTrial': true,
-      },
-    );
+    late final String clinicDocId;
+    try {
+      final clinicDoc = await _databases.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: 'clinics',
+        rowId: ID.unique(),
+        data: {
+          'name': clinicName,
+          'clinicCode': clinicCode,
+          'adminId': uid,
+          'createdAt': DateTime.now().toIso8601String(),
+          'subscriptionEndDate': trialEndDate.toIso8601String(),
+          'isTrial': true,
+        },
+      );
+      clinicDocId = clinicDoc.$id;
+      debugPrint('✅ [Auth] signUpAsAdmin — clinic created: clinicId=$clinicDocId');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsAdmin — create clinic failed: $e');
+      rethrow;
+    }
 
     // 4. Create User Document with Admin role
     final appUser = AppUser(
@@ -142,27 +179,35 @@ class AuthRepository {
       name: name,
       email: email,
       phone: phone,
-      clinicId: clinicDoc.$id,
+      clinicId: clinicDocId,
       role: 'admin',
       isApproved: true,
     );
-
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'users',
-      documentId: uid,
-      data: appUser.toMap(),
-    );
+    try {
+      await _databases.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: 'users',
+        rowId: uid,
+        data: appUser.toMap(),
+      );
+      debugPrint('✅ [Auth] signUpAsAdmin — user document created in DB');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsAdmin — create user document failed: $e');
+      rethrow;
+    }
 
     // 5. Create Membership record for this clinic
     try {
-      await ensureAdminMembership(uid, clinicDoc.$id);
+      await ensureAdminMembership(uid, clinicDocId);
+      debugPrint('✅ [Auth] signUpAsAdmin — membership created');
     } catch (e) {
-      debugPrint('⚠️ [SignUp] Membership step failed (non-fatal): $e');
+      debugPrint('⚠️ [Auth] signUpAsAdmin — membership step failed (non-fatal): $e');
     }
 
     // Automatically log in newly signed up user
+    debugPrint('▶ [Auth] signUpAsAdmin — auto-login');
     await login(email, password);
+    debugPrint('🎉 [Auth] signUpAsAdmin() — completed successfully');
   }
 
   // Join Existing Clinic via Code (Secretary)
@@ -173,27 +218,42 @@ class AuthRepository {
     required String password,
     required String clinicCode,
   }) async {
-    // 1. Verify Clinic Code exists
-    final clinicsQuery = await _databases.listDocuments(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      queries: [Query.equal('clinicCode', clinicCode), Query.limit(1)],
-    );
+    debugPrint('▶ [Auth] signUpAsSecretary() — email=$email, clinicCode=$clinicCode');
 
-    if (clinicsQuery.documents.isEmpty) {
-      throw Exception('invalid_clinic_code');
+    // 1. Verify Clinic Code exists
+    late final String clinicId;
+    try {
+      final clinicsQuery = await _databases.listRows(
+        databaseId: appwriteDatabaseId,
+        tableId: 'clinics',
+        queries: [Query.equal('clinicCode', clinicCode), Query.limit(1)],
+      );
+      if (clinicsQuery.rows.isEmpty) {
+        debugPrint('❌ [Auth] signUpAsSecretary — invalid clinic code: $clinicCode');
+        throw Exception('invalid_clinic_code');
+      }
+      clinicId = clinicsQuery.rows.first.$id;
+      debugPrint('✅ [Auth] signUpAsSecretary — clinic found: clinicId=$clinicId');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsSecretary — clinic lookup failed: $e');
+      rethrow;
     }
 
-    final clinicId = clinicsQuery.documents.first.$id;
-
     // 2. Create Auth User
-    final user = await _account.create(
-      userId: ID.unique(),
-      email: email,
-      password: password,
-      name: name,
-    );
-    final uid = user.$id;
+    late final String uid;
+    try {
+      final user = await _account.create(
+        userId: ID.unique(),
+        email: email,
+        password: password,
+        name: name,
+      );
+      uid = user.$id;
+      debugPrint('✅ [Auth] signUpAsSecretary — auth user created: uid=$uid');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsSecretary — account.create failed: $e');
+      rethrow;
+    }
 
     // 3. Create User Document with Secretary role
     final appUser = AppUser(
@@ -205,57 +265,70 @@ class AuthRepository {
       role: 'secretary',
       isApproved: false,
     );
-
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'users',
-      documentId: uid,
-      data: appUser.toMap(),
-    );
+    try {
+      await _databases.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: 'users',
+        rowId: uid,
+        data: appUser.toMap(),
+      );
+      debugPrint('✅ [Auth] signUpAsSecretary — user document created in DB');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsSecretary — create user document failed: $e');
+      rethrow;
+    }
 
     // 4. Create Pending Membership record
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
-      documentId: ID.unique(),
-      data: {
-        'userId': uid,
-        'clinicId': clinicId,
-        'role': 'secretary',
-        'status': 'pending',
-        'joinedAt': DateTime.now().toIso8601String(),
-      },
-    );
+    try {
+      await _databases.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: 'memberships',
+        rowId: ID.unique(),
+        data: {
+          'userId': uid,
+          'clinicId': clinicId,
+          'role': 'secretary',
+          'status': 'pending',
+          'joinedAt': DateTime.now().toIso8601String(),
+        },
+      );
+      debugPrint('✅ [Auth] signUpAsSecretary — pending membership created');
+    } catch (e) {
+      debugPrint('❌ [Auth] signUpAsSecretary — create membership failed: $e');
+      rethrow;
+    }
 
+    debugPrint('▶ [Auth] signUpAsSecretary — auto-login');
     await login(email, password);
+    debugPrint('🎉 [Auth] signUpAsSecretary() — completed successfully');
   }
 
   // --- Admin Approval Actions ---
 
   Future<void> approveUser(String uid) async {
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'users',
-      documentId: uid,
+      tableId: 'users',
+      rowId: uid,
       data: {'isApproved': true},
     );
   }
 
   Future<void> rejectUser(String uid) async {
-    await _databases.deleteDocument(
+    await _databases.deleteRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'users',
-      documentId: uid,
+      tableId: 'users',
+      rowId: uid,
     );
   }
 
   // --- Clinic Management ---
 
   Future<void> updateClinicCode(String clinicId, String newCode) async {
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinicId,
+      tableId: 'clinics',
+      rowId: clinicId,
       data: {'clinicCode': newCode},
     );
   }
@@ -276,13 +349,13 @@ class AuthRepository {
   // ─── Groups / Multi-Clinic Membership System ───────────────────────────────
 
   Future<List<ClinicMembership>> getUserMemberships(String userId) async {
-    final snap = await _databases.listDocuments(
+    final snap = await _databases.listRows(
       databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
+      tableId: 'memberships',
       queries: [Query.equal('userId', userId)],
     );
 
-    final memberships = snap.documents
+    final memberships = snap.rows
         .map((d) => ClinicMembership.fromMap(d.data, d.$id))
         .toList();
 
@@ -295,14 +368,14 @@ class AuthRepository {
       // Unfortunately Appwrite limit in queries array values varies. A safer approach is to fetch all matching clinics or process them.
       // If clinicIds is less than 100, we can use Query.equal.
       if (clinicIds.isNotEmpty) {
-        final clinicsSnap = await _databases.listDocuments(
+        final clinicsSnap = await _databases.listRows(
           databaseId: appwriteDatabaseId,
-          collectionId: 'clinics',
+          tableId: 'clinics',
           queries: [
             Query.equal('\$id', clinicIds), // Search by document ID
           ],
         );
-        for (var d in clinicsSnap.documents) {
+        for (var d in clinicsSnap.rows) {
           nameMap[d.$id] = d.data['name'] ?? '';
         }
       }
@@ -326,9 +399,9 @@ class AuthRepository {
 
   Future<void> switchClinic(String userId, String clinicId) async {
     // 1. Get membership to retrieve role & status
-    final memberSnap = await _databases.listDocuments(
+    final memberSnap = await _databases.listRows(
       databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
+      tableId: 'memberships',
       queries: [
         Query.equal('userId', userId),
         Query.equal('clinicId', clinicId),
@@ -336,11 +409,11 @@ class AuthRepository {
       ],
     );
 
-    if (memberSnap.documents.isEmpty) {
+    if (memberSnap.rows.isEmpty) {
       throw Exception('no_membership_found');
     }
 
-    final memberData = memberSnap.documents.first.data;
+    final memberData = memberSnap.rows.first.data;
     final status = memberData['status'] ?? 'approved';
     if (status == 'pending') {
       throw Exception('group_pending_admin_approval');
@@ -349,66 +422,86 @@ class AuthRepository {
     final role = memberData['role'] ?? 'secretary';
 
     // 2. Update user document
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'users',
-      documentId: userId,
+      tableId: 'users',
+      rowId: userId,
       data: {'clinicId': clinicId, 'role': role, 'isApproved': true},
     );
   }
 
   Future<void> joinClinicByCode(String userId, String clinicCode) async {
-    // 1. Find clinic by code
-    final clinicsQuery = await _databases.listDocuments(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      queries: [
-        Query.equal('clinicCode', clinicCode.toUpperCase()),
-        Query.limit(1),
-      ],
-    );
+    debugPrint('▶ [Auth] joinClinicByCode() — userId=$userId, code=$clinicCode');
 
-    if (clinicsQuery.documents.isEmpty) {
-      throw Exception('invalid_clinic_code');
+    // 1. Find clinic by code
+    late final String clinicId;
+    try {
+      final clinicsQuery = await _databases.listRows(
+        databaseId: appwriteDatabaseId,
+        tableId: 'clinics',
+        queries: [
+          Query.equal('clinicCode', clinicCode.toUpperCase()),
+          Query.limit(1),
+        ],
+      );
+      if (clinicsQuery.rows.isEmpty) {
+        debugPrint('❌ [Auth] joinClinicByCode — invalid code: $clinicCode');
+        throw Exception('invalid_clinic_code');
+      }
+      clinicId = clinicsQuery.rows.first.$id;
+      debugPrint('✅ [Auth] joinClinicByCode — clinic found: clinicId=$clinicId');
+    } catch (e) {
+      debugPrint('❌ [Auth] joinClinicByCode — clinic lookup failed: $e');
+      rethrow;
     }
 
-    final clinicId = clinicsQuery.documents.first.$id;
-
     // 2. Check if already a member
-    final existing = await _databases.listDocuments(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
-      queries: [
-        Query.equal('userId', userId),
-        Query.equal('clinicId', clinicId),
-        Query.limit(1),
-      ],
-    );
-
-    if (existing.documents.isNotEmpty) {
-      throw Exception('already_member_or_pending');
+    try {
+      final existing = await _databases.listRows(
+        databaseId: appwriteDatabaseId,
+        tableId: 'memberships',
+        queries: [
+          Query.equal('userId', userId),
+          Query.equal('clinicId', clinicId),
+          Query.limit(1),
+        ],
+      );
+      if (existing.rows.isNotEmpty) {
+        debugPrint('⚠️ [Auth] joinClinicByCode — already member or pending for clinicId=$clinicId');
+        throw Exception('already_member_or_pending');
+      }
+      debugPrint('✅ [Auth] joinClinicByCode — no existing membership, proceeding');
+    } catch (e) {
+      debugPrint('❌ [Auth] joinClinicByCode — membership check failed: $e');
+      rethrow;
     }
 
     // 3. Create pending membership
-    await _databases.createDocument(
-      databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
-      documentId: ID.unique(),
-      data: {
-        'userId': userId,
-        'clinicId': clinicId,
-        'role': 'secretary',
-        'status': 'pending',
-        'joinedAt': DateTime.now().toIso8601String(),
-      },
-    );
+    try {
+      await _databases.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: 'memberships',
+        rowId: ID.unique(),
+        data: {
+          'userId': userId,
+          'clinicId': clinicId,
+          'role': 'secretary',
+          'status': 'pending',
+          'joinedAt': DateTime.now().toIso8601String(),
+        },
+      );
+      debugPrint('🎉 [Auth] joinClinicByCode() — pending membership created successfully');
+    } catch (e) {
+      debugPrint('❌ [Auth] joinClinicByCode — create membership failed: $e');
+      rethrow;
+    }
   }
 
   Future<void> leaveMembership(String membershipId) async {
-    await _databases.deleteDocument(
+    await _databases.deleteRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
-      documentId: membershipId,
+      tableId: 'memberships',
+      rowId: membershipId,
     );
   }
 
@@ -421,10 +514,10 @@ class AuthRepository {
 
     // 2. Create Clinic Document with 60-day Trial
     final trialEndDate = DateTime.now().add(const Duration(days: 60));
-    final clinicDoc = await _databases.createDocument(
+    final clinicDoc = await _databases.createRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: ID.unique(),
+      tableId: 'clinics',
+      rowId: ID.unique(),
       data: {
         'name': clinicName,
         'clinicCode': clinicCode,
@@ -439,18 +532,18 @@ class AuthRepository {
     await ensureAdminMembership(userId, clinicDoc.$id);
 
     // 4. Update User Document to set this as the active clinic
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'users',
-      documentId: userId,
+      tableId: 'users',
+      rowId: userId,
       data: {'clinicId': clinicDoc.$id, 'role': 'admin', 'isApproved': true},
     );
   }
 
   Future<void> ensureAdminMembership(String userId, String clinicId) async {
-    final existing = await _databases.listDocuments(
+    final existing = await _databases.listRows(
       databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
+      tableId: 'memberships',
       queries: [
         Query.equal('userId', userId),
         Query.equal('clinicId', clinicId),
@@ -458,11 +551,11 @@ class AuthRepository {
       ],
     );
 
-    if (existing.documents.isEmpty) {
-      await _databases.createDocument(
+    if (existing.rows.isEmpty) {
+      await _databases.createRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'memberships',
-        documentId: ID.unique(),
+        tableId: 'memberships',
+        rowId: ID.unique(),
         data: {
           'userId': userId,
           'clinicId': clinicId,
@@ -477,9 +570,9 @@ class AuthRepository {
   Future<void> selfHealMembership(String userId, String primaryClinicId) async {
     if (primaryClinicId.isEmpty) return;
 
-    final existing = await _databases.listDocuments(
+    final existing = await _databases.listRows(
       databaseId: appwriteDatabaseId,
-      collectionId: 'memberships',
+      tableId: 'memberships',
       queries: [
         Query.equal('userId', userId),
         Query.equal('clinicId', primaryClinicId),
@@ -487,19 +580,19 @@ class AuthRepository {
       ],
     );
 
-    if (existing.documents.isEmpty) {
+    if (existing.rows.isEmpty) {
       try {
-        final userDoc = await _databases.getDocument(
+        final userDoc = await _databases.getRow(
           databaseId: appwriteDatabaseId,
-          collectionId: 'users',
-          documentId: userId,
+          tableId: 'users',
+          rowId: userId,
         );
         final role = userDoc.data['role'] ?? 'secretary';
 
-        await _databases.createDocument(
+        await _databases.createRow(
           databaseId: appwriteDatabaseId,
-          collectionId: 'memberships',
-          documentId: ID.unique(),
+          tableId: 'memberships',
+          rowId: ID.unique(),
           data: {
             'userId': userId,
             'clinicId': primaryClinicId,
@@ -515,10 +608,10 @@ class AuthRepository {
   }
 
   Future<void> updateClinic(ClinicGroup clinic) async {
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinic.id,
+      tableId: 'clinics',
+      rowId: clinic.id,
       data: clinic.toMap(),
     );
   }

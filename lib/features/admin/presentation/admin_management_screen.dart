@@ -182,12 +182,12 @@ class AdminManagementScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
 
-          FutureBuilder<models.DocumentList>(
+          FutureBuilder<models.RowList>(
             future: ref
-                .read(appwriteDatabasesProvider)
-                .listDocuments(
+                .read(appwriteTablesDBProvider)
+                .listRows(
                   databaseId: appwriteDatabaseId,
-                  collectionId: 'users',
+                  tableId: 'users',
                   queries: [Query.equal('clinicId', adminUser.clinicId)],
                 ),
             builder: (context, snapshot) {
@@ -200,7 +200,7 @@ class AdminManagementScreen extends ConsumerWidget {
                 );
               }
 
-              final users = snapshot.data!.documents
+              final users = snapshot.data!.rows
                   .map((doc) => AppUser.fromMap(doc.data, doc.$id))
                   .toList();
 
@@ -243,11 +243,11 @@ class AdminManagementScreen extends ConsumerWidget {
                           : PopupMenuButton<String>(
                               onSelected: (newValue) async {
                                 await ref
-                                    .read(appwriteDatabasesProvider)
-                                    .updateDocument(
+                                    .read(appwriteTablesDBProvider)
+                                    .updateRow(
                                       databaseId: appwriteDatabaseId,
-                                      collectionId: 'users',
-                                      documentId: employee.id,
+                                      tableId: 'users',
+                                      rowId: employee.id,
                                       data: {'role': newValue},
                                     );
                               },
@@ -293,23 +293,23 @@ class AdminManagementScreen extends ConsumerWidget {
     WidgetRef ref,
     AppUser adminUser,
   ) {
-    return FutureBuilder<models.DocumentList>(
+    return FutureBuilder<models.RowList>(
       future: ref
-          .read(appwriteDatabasesProvider)
-          .listDocuments(
+          .read(appwriteTablesDBProvider)
+          .listRows(
             databaseId: appwriteDatabaseId,
-            collectionId: 'users',
+            tableId: 'users',
             queries: [
               Query.equal('clinicId', adminUser.clinicId),
               Query.equal('isApproved', false),
             ],
           ),
       builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.documents.isEmpty) {
+        if (!snapshot.hasData || snapshot.data!.rows.isEmpty) {
           return const SizedBox.shrink();
         }
 
-        final pendingUsers = snapshot.data!.documents;
+        final pendingUsers = snapshot.data!.rows;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -426,7 +426,7 @@ class AdminManagementScreen extends ConsumerWidget {
   ) async {
     showDialog(
       context: context,
-      builder: (context) => DeleteConfirmationDialog(
+      builder: (dialogContext) => DeleteConfirmationDialog(
         title: ref.tr('reject_request'),
         content: ref.tr('reject_confirm_msg', [user.name]),
         deleteButtonText: ref.tr('reject_and_delete'),

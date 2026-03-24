@@ -44,6 +44,7 @@ class MedicalRecord {
   final double paidAmount;
   final double remainingAmount;
   final String? parentRecordId;
+  final String? transactionId;
   final bool isFinalized;
 
   MedicalRecord({
@@ -57,6 +58,7 @@ class MedicalRecord {
     this.paidAmount = 0.0,
     this.remainingAmount = 0.0,
     this.parentRecordId,
+    this.transactionId,
     this.isFinalized = false,
   });
 
@@ -80,6 +82,7 @@ class MedicalRecord {
       paidAmount: (map['paidAmount'] as num?)?.toDouble() ?? 0.0,
       remainingAmount: (map['remainingAmount'] as num?)?.toDouble() ?? 0.0,
       parentRecordId: map['parentRecordId'],
+      transactionId: map['transactionId'],
       isFinalized: map['isFinalized'] ?? false,
     );
   }
@@ -96,6 +99,7 @@ class MedicalRecord {
       'paidAmount': paidAmount,
       'remainingAmount': remainingAmount,
       'parentRecordId': parentRecordId,
+      'transactionId': transactionId,
       'isFinalized': isFinalized,
     };
   }
@@ -111,6 +115,7 @@ class MedicalRecord {
     double? paidAmount,
     double? remainingAmount,
     String? parentRecordId,
+    String? transactionId,
     bool? isFinalized,
   }) {
     return MedicalRecord(
@@ -124,6 +129,7 @@ class MedicalRecord {
       paidAmount: paidAmount ?? this.paidAmount,
       remainingAmount: remainingAmount ?? this.remainingAmount,
       parentRecordId: parentRecordId ?? this.parentRecordId,
+      transactionId: transactionId ?? this.transactionId,
       isFinalized: isFinalized ?? this.isFinalized,
     );
   }

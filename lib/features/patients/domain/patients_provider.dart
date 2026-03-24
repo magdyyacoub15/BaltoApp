@@ -1,57 +1,76 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../../core/services/polling_service.dart';
 import 'patient.dart';
 
-// Future provider of all patients for the current user's clinic
-final patientsStreamProvider = FutureProvider<List<Patient>>((ref) async {
+// ─── Manual Refresh Trigger for Patients ─────────────────────────────────────
+class PatientsRefreshNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+  void refresh() => state++;
+}
+
+final patientsRefreshProvider =
+    NotifierProvider<PatientsRefreshNotifier, int>(PatientsRefreshNotifier.new);
+
+// ─── Patients Stream Provider ─────────────────────────────────────────────────
+// Reacts to:
+//   1. patientsRefreshProvider increments (local writes → immediate)
+//   2. pollingTickProvider (every 5 sec → other devices)
+final patientsStreamProvider = StreamProvider<List<Patient>>((ref) async* {
   final user = await ref.watch(currentUserProvider.future);
+  if (user == null) {
+    yield [];
+    return;
+  }
+
+  final clinicId = user.clinicId;
   final repo = ref.watch(patientRepositoryProvider);
 
-  if (user != null) {
-    return await repo.getPatients(user.clinicId);
-  }
-  return [];
+  ref.watch(patientsRefreshProvider);
+  ref.watch(pollingTickProvider);
+
+  // Fetch directly from network — no cache, no checkIsOnline
+  final data = await repo.fetchLivePatients(clinicId);
+  yield data;
 });
 
-// Search query notifier for filtering results locally
+// Search query notifier
 class SearchQuery extends Notifier<String> {
   @override
   String build() => '';
-
-  void update(String query) {
-    state = query;
-  }
+  void update(String query) => state = query;
 }
 
 final searchQueryProvider = NotifierProvider<SearchQuery, String>(
   SearchQuery.new,
 );
 
-// Sorting options for the patient list
+// Sorting options
 enum PatientSort { name, date }
 
 class PatientSortNotifier extends Notifier<PatientSort> {
   @override
   PatientSort build() => PatientSort.name;
-
-  void setSort(PatientSort sort) {
-    state = sort;
-  }
+  void setSort(PatientSort sort) => state = sort;
 }
 
 final patientSortProvider = NotifierProvider<PatientSortNotifier, PatientSort>(
   PatientSortNotifier.new,
 );
 
-// Filtered patient list combining the live stream, the search query, and excluding new patients added today
-final filteredPatientsProvider = FutureProvider<List<Patient>>((ref) async {
-  final patients = await ref.watch(patientsStreamProvider.future);
+// ─── Filtered patient list ────────────────────────────────────────────────────
+final filteredPatientsProvider = StreamProvider<List<Patient>>((ref) async* {
+  final patientsAsync = ref.watch(patientsStreamProvider);
   final query = ref.watch(searchQueryProvider).toLowerCase();
-  final threshold = await ref.watch(clinicVisibilityThresholdProvider.future);
+  final threshold = ref.watch(clinicVisibilityThresholdProvider);
   final sort = ref.watch(patientSortProvider);
 
-  // 1. Exclude entirely new patients added during the current shift
+  final patients = patientsAsync.value;
+  if (patients == null) return;
+
+  // 1. Exclude new patients added during the current shift
   var filtered = patients.where((p) {
     final isNewToday =
         p.records.length == 1 &&
@@ -63,10 +82,7 @@ final filteredPatientsProvider = FutureProvider<List<Patient>>((ref) async {
   // 2. Apply search query
   if (query.isNotEmpty) {
     filtered = filtered
-        .where(
-          (p) =>
-              p.name.toLowerCase().contains(query) || p.phone.contains(query),
-        )
+        .where((p) => p.name.toLowerCase().contains(query) || p.phone.contains(query))
         .toList();
   }
 
@@ -77,5 +93,5 @@ final filteredPatientsProvider = FutureProvider<List<Patient>>((ref) async {
     filtered.sort((a, b) => b.lastVisit.compareTo(a.lastVisit));
   }
 
-  return filtered;
+  yield filtered;
 });

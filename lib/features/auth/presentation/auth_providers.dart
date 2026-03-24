@@ -7,6 +7,7 @@ import '../domain/models/clinic_group.dart';
 import '../domain/models/clinic_membership.dart';
 import '../data/auth_repository.dart';
 import '../../../core/services/appwrite_client.dart';
+import '../../../core/services/polling_service.dart';
 
 // Stream of Appwrite Auth State (Session)
 final authStateProvider = StreamProvider<models.User?>((ref) {
@@ -24,24 +25,34 @@ final currentUserProvider = FutureProvider<AppUser?>((ref) async {
   return null;
 });
 
-// FutureProvider of Clinic Data based on the currentUser's clinicId
-final clinicStreamProvider = FutureProvider<ClinicGroup?>((ref) async {
+// StreamProvider of Clinic Data based on the currentUser's clinicId
+final clinicStreamProvider = StreamProvider<ClinicGroup?>((ref) async* {
   final user = await ref.watch(currentUserProvider.future);
   final authRepo = ref.watch(authRepositoryProvider);
-  if (user != null) {
-    return await authRepo.getClinicData(user.clinicId);
+  if (user == null) {
+    yield null;
+    return;
   }
-  return null;
+
+  // REFRESH TRIGGER: This causes the entire StreamProvider to re-run every 15 seconds
+  // ensuring that visibilityThreshold (lastShiftReset) is updated on all devices.
+  ref.watch(pollingTickProvider);
+
+  try {
+    final updatedClinic = await authRepo.getClinicData(user.clinicId);
+    yield updatedClinic;
+  } catch (e) {
+    // Ignore network errors on background polling to keep showing the last known state
+  }
 });
 
 // Provider for the visibility threshold (24 hours ago OR last manual reset)
-final clinicVisibilityThresholdProvider = FutureProvider<DateTime>((ref) async {
-  final clinic = await ref.watch(clinicStreamProvider.future);
+final clinicVisibilityThresholdProvider = Provider<DateTime>((ref) {
+  final clinic = ref.watch(clinicStreamProvider).value;
   final now = DateTime.now();
   final twentyFourHoursAgo = now.subtract(const Duration(hours: 24));
 
   if (clinic?.lastShiftReset != null) {
-    // If reset happened more than 24 hours ago, it's irrelevant, use 24h as base
     return clinic!.lastShiftReset!.isAfter(twentyFourHoursAgo)
         ? clinic.lastShiftReset!
         : twentyFourHoursAgo;
@@ -71,20 +82,20 @@ final clinicAdminProvider = FutureProvider<AppUser?>((ref) async {
   final user = await ref.watch(currentUserProvider.future);
 
   if (user != null) {
-    final databases = ref.read(appwriteDatabasesProvider);
+    final databases = ref.read(appwriteTablesDBProvider);
 
     try {
-      final result = await databases.listDocuments(
+      final result = await databases.listRows(
         databaseId: appwriteDatabaseId,
-        collectionId: 'users',
+        tableId: 'users',
         queries: [
           Query.equal('clinicId', user.clinicId),
           Query.equal('role', 'admin'),
           Query.limit(1),
         ],
       );
-      if (result.documents.isNotEmpty) {
-        final doc = result.documents.first;
+      if (result.rows.isNotEmpty) {
+        final doc = result.rows.first;
         return AppUser.fromMap(doc.data, doc.$id);
       }
     } catch (e) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../domain/patient.dart';
@@ -183,6 +184,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                               unit: ref.tr('years_unit'),
                               subtitle: DateFormat(
                                 'yyyy/MM/dd',
+                                ref.read(languageProvider).languageCode,
                               ).format(livePatient.dateOfBirth),
                               icon: Icons.cake_outlined,
                               color: Colors.blue,
@@ -317,7 +319,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
   ) async {
     showDialog(
       context: context,
-      builder: (context) => DeleteConfirmationDialog(
+      builder: (dialogContext) => DeleteConfirmationDialog(
         title: ref.tr('delete_visit_title'),
         content: ref.tr('delete_visit_desc'),
         onDelete: () async {
@@ -832,50 +834,50 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                                   },
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
-                                    child: Image.network(
-                                      record.attachmentUrls[i],
+                                    child: CachedNetworkImage(
+                                      imageUrl: record.attachmentUrls[i],
                                       width: 250,
                                       height: 250,
                                       fit: BoxFit.cover,
-                                      loadingBuilder:
-                                          (context, child, progress) {
-                                            if (progress == null) return child;
-                                            return Container(
-                                              width: 250,
-                                              height: 250,
-                                              color: Colors.grey.shade200,
-                                              child: const Center(
-                                                child:
-                                                    CircularProgressIndicator(),
-                                              ),
-                                            );
-                                          },
-                                      errorBuilder:
-                                          (context, error, stackTrace) {
-                                            return Container(
-                                              width: 250,
-                                              height: 250,
-                                              color: Colors.grey.shade200,
-                                              child: Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                children: [
-                                                  Icon(
-                                                    Icons.broken_image_outlined,
-                                                    size: 40,
-                                                    color: Colors.grey,
-                                                  ),
-                                                  SizedBox(height: 8),
-                                                  Text(
-                                                    ref.tr('image_load_failed'),
-                                                    style: TextStyle(
+                                      placeholder: (context, url) =>
+                                          Container(
+                                            width: 250,
+                                            height: 250,
+                                            color: Colors.grey.shade200,
+                                            child: const Center(
+                                              child:
+                                                  CircularProgressIndicator(),
+                                            ),
+                                          ),
+                                      errorWidget:
+                                          (context, url, error) =>
+                                              Container(
+                                                width: 250,
+                                                height: 250,
+                                                color: Colors.grey.shade200,
+                                                child: Column(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment
+                                                          .center,
+                                                  children: [
+                                                    Icon(
+                                                      Icons
+                                                          .broken_image_outlined,
+                                                      size: 40,
                                                       color: Colors.grey,
                                                     ),
-                                                  ),
-                                                ],
+                                                    SizedBox(height: 8),
+                                                    Text(
+                                                      ref.tr(
+                                                        'image_load_failed',
+                                                      ),
+                                                      style: TextStyle(
+                                                        color: Colors.grey,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
-                                            );
-                                          },
                                     ),
                                   ),
                                 ),
@@ -1091,11 +1093,10 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
 
   Widget _buildCurrentVisitCard(BuildContext context, Patient patient) {
     final latestRecords =
-        patient.records.where((r) => r.parentRecordId == null).toList()
+        patient.records.where((r) => !r.isFinalized).toList()
           ..sort((a, b) => b.date.compareTo(a.date));
 
-    // If no records or latest record is finalized, hiding the add visit button as requested
-    if (latestRecords.isEmpty || latestRecords.first.isFinalized) {
+    if (latestRecords.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -1167,7 +1168,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                DateFormat('yyyy/MM/dd hh:mm a').format(record.date),
+                DateFormat('yyyy/MM/dd hh:mm a', ref.read(languageProvider).languageCode).format(record.date),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12,

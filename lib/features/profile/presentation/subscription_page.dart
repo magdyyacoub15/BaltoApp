@@ -82,11 +82,11 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
 
   Future<void> _loadPrices() async {
     try {
-      final databases = ref.read(appwriteDatabasesProvider);
-      final doc = await databases.getDocument(
+      final databases = ref.read(appwriteTablesDBProvider);
+      final doc = await databases.getRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'config',
-        documentId: 'subscription_prices',
+        tableId: 'config',
+        rowId: 'subscription_prices',
       );
       if (doc.data.isNotEmpty) {
         final data = doc.data;
@@ -153,20 +153,20 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
                   };
 
                   try {
-                    final databases = ref.read(appwriteDatabasesProvider);
+                    final databases = ref.read(appwriteTablesDBProvider);
                     try {
-                      await databases.updateDocument(
+                      await databases.updateRow(
                         databaseId: appwriteDatabaseId,
-                        collectionId: 'config',
-                        documentId: 'subscription_prices',
+                        tableId: 'config',
+                        rowId: 'subscription_prices',
                         data: data,
                       );
                     } on AppwriteException catch (e) {
                       if (e.code == 404) {
-                        await databases.createDocument(
+                        await databases.createRow(
                           databaseId: appwriteDatabaseId,
-                          collectionId: 'config',
-                          documentId: 'subscription_prices',
+                          tableId: 'config',
+                          rowId: 'subscription_prices',
                           data: data,
                         );
                       } else {

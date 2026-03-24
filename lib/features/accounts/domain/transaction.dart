@@ -28,11 +28,20 @@ class AppTransaction {
   }
 
   factory AppTransaction.fromMap(Map<String, dynamic> map, String id) {
+    // Robust parsing for TransactionType to handle old data (income/outcome) or nulls
+    TransactionType parsedType = TransactionType.revenue;
+    final typeStr = map['type']?.toString().toLowerCase();
+    if (typeStr == 'expense' || typeStr == 'outcome') {
+      parsedType = TransactionType.expense;
+    } else if (typeStr == 'revenue' || typeStr == 'income') {
+      parsedType = TransactionType.revenue;
+    }
+
     return AppTransaction(
       id: id,
-      amount: (map['amount'] as num).toDouble(),
+      amount: (map['amount'] as num?)?.toDouble() ?? 0.0,
       description: map['description'] ?? '',
-      type: TransactionType.values.byName(map['type']),
+      type: parsedType,
       date: map['date'] != null
           ? DateTime.tryParse(map['date'].toString()) ?? DateTime.now()
           : DateTime.now(),

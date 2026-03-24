@@ -154,9 +154,9 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
-        final url = await imgbbService.uploadImage(_visitImages[i]);
-        if (url != null) {
-          uploadedUrls.add(url);
+        final result = await imgbbService.uploadImage(_visitImages[i]);
+        if (result != null) {
+          uploadedUrls.add(result.url);
         }
       } catch (e) {
         debugPrint('Error uploading image $i: $e');
@@ -208,13 +208,13 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
-              title: const Text(
-                'طباعة الروشتة',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              title: Text(
+                ref.tr('print_prescription_dialog_title'),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               ),
-              content: const Text(
-                'تم حفظ الزيارة بنجاح. هل تريد طباعة الروشتة الآن؟',
-                style: TextStyle(fontSize: 14),
+              content: Text(
+                ref.tr('print_prescription_dialog_content'),
+                style: const TextStyle(fontSize: 14),
               ),
               actions: [
                 TextButton(
@@ -679,7 +679,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   ),
                 ),
                 Text(
-                  '${ref.tr('last_visit')}: ${DateFormat('yyyy/MM/dd').format(widget.record.date)}',
+                  '${ref.tr('last_visit')}: ${DateFormat('yyyy/MM/dd', ref.read(languageProvider).languageCode).format(widget.record.date)}',
                   style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ],
@@ -724,7 +724,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                   ),
                   const Spacer(),
                   Text(
-                    DateFormat('yyyy/MM/dd hh:mm a').format(widget.record.date),
+                    DateFormat('yyyy/MM/dd hh:mm a', ref.read(languageProvider).languageCode).format(widget.record.date),
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ],
@@ -1181,7 +1181,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
               ),
               const Spacer(),
               Text(
-                DateFormat('yyyy/MM/dd').format(record.date),
+                DateFormat('yyyy/MM/dd', ref.read(languageProvider).languageCode).format(record.date),
                 style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
               ),
             ],

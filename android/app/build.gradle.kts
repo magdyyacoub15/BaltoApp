@@ -6,6 +6,9 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// Direct Gradle to output to the directory Flutter expects
+layout.buildDirectory.set(file("../../build/app"))
+
 android {
     namespace = "com.example.doc"
     compileSdk = flutter.compileSdkVersion

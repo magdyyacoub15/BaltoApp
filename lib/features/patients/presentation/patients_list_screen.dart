@@ -730,7 +730,7 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
   ) async {
     showDialog(
       context: context,
-      builder: (context) => DeleteConfirmationDialog(
+      builder: (dialogContext) => DeleteConfirmationDialog(
         title: ref.tr('delete_patient'),
         content: ref.tr('delete_confirm_patient', [patient.name]),
         onDelete: () async {

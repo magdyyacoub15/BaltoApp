@@ -7,10 +7,11 @@ import 'core/theme/app_theme.dart';
 import 'core/providers/settings_provider.dart';
 import 'core/localization/language_provider.dart';
 import 'core/services/hive_cache_service.dart';
+import 'core/services/sync_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initHive(); // Initialize Hive before anything else
+  await initHive(); // initialises all Hive boxes including offline_queue
   final prefs = await SharedPreferences.getInstance();
 
   runApp(
@@ -21,14 +22,29 @@ void main() async {
   );
 }
 
-class ClinicApp extends ConsumerWidget {
+class ClinicApp extends ConsumerStatefulWidget {
   const ClinicApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final router = ref.watch(routerProvider);
+  ConsumerState<ClinicApp> createState() => _ClinicAppState();
+}
+
+class _ClinicAppState extends ConsumerState<ClinicApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Start the background sync listener as soon as the widget tree is ready.
+    // Uses addPostFrameCallback so that all providers are initialised first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(syncServiceProvider).startListening();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final router   = ref.watch(routerProvider);
     final appScale = ref.watch(appScaleProvider);
-    final locale = ref.watch(languageProvider);
+    final locale   = ref.watch(languageProvider);
 
     return MaterialApp.router(
       title: 'BaltoPro',

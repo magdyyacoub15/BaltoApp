@@ -12,6 +12,7 @@ import '../../auth/data/auth_repository.dart';
 import '../../accounts/domain/accounts_provider.dart';
 import '../../accounts/data/transaction_repository.dart';
 import '../../accounts/domain/transaction.dart';
+import '../../patients/domain/models/medical_record.dart';
 import '../../patients/data/patient_repository.dart';
 import '../../../core/presentation/widgets/scaled_icon.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
@@ -155,146 +156,58 @@ class DashboardScreen extends ConsumerWidget {
     WidgetRef ref,
     int appointments,
     int waiting,
-    AsyncValue<Map<String, double>> dailyFinance,
+    Map<String, double> finance,
   ) {
-    return dailyFinance.when(
-      data: (finance) => Row(
-        children: [
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('appointments'),
-              '$appointments',
-              Icons.calendar_today_rounded,
-              [const Color(0xFF6441A5), const Color(0xFF2a0845)],
-            ),
+    return Row(
+      children: [
+        Expanded(
+          child: _buildGradientCard(
+            context,
+            ref.tr('appointments'),
+            '$appointments',
+            Icons.calendar_today_rounded,
+            [const Color(0xFF6441A5), const Color(0xFF2a0845)],
           ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('waiting'),
-              '$waiting',
-              Icons.people_alt_rounded,
-              [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
-            ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: _buildGradientCard(
+            context,
+            ref.tr('waiting'),
+            '$waiting',
+            Icons.people_alt_rounded,
+            [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
           ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: InkWell(
-              onTap: () => _showIncomeDetailsDialog(context, ref),
-              borderRadius: BorderRadius.circular(24),
-              child: _buildGradientCard(
-                context,
-                ref.tr('net_income'),
-                '${finance['net']?.toInt() ?? 0}',
-                Icons.account_balance_wallet_rounded,
-                [const Color(0xFF11998e), const Color(0xFF38ef7d)],
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: InkWell(
-              onTap: () => _showExpenseDetailsDialog(context, ref),
-              borderRadius: BorderRadius.circular(24),
-              child: _buildGradientCard(
-                context,
-                ref.tr('expenses'),
-                '${finance['expense']?.toInt() ?? 0}',
-                Icons.money_off_rounded,
-                [const Color(0xFFE53935), const Color(0xFFE35D5B)],
-              ),
-            ),
-          ),
-        ],
-      ),
-      loading: () => Row(
-        children: [
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('appointments'),
-              '$appointments',
-              Icons.calendar_today_rounded,
-              [const Color(0xFF6441A5), const Color(0xFF2a0845)],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('waiting'),
-              '$waiting',
-              Icons.people_alt_rounded,
-              [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: InkWell(
+            onTap: () => _showIncomeDetailsDialog(context, ref),
+            borderRadius: BorderRadius.circular(24),
             child: _buildGradientCard(
               context,
               ref.tr('net_income'),
-              '...',
+              '${finance['net']?.toInt() ?? 0}',
               Icons.account_balance_wallet_rounded,
               [const Color(0xFF11998e), const Color(0xFF38ef7d)],
             ),
           ),
-          const SizedBox(width: 4),
-          Expanded(
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: InkWell(
+            onTap: () => _showExpenseDetailsDialog(context, ref),
+            borderRadius: BorderRadius.circular(24),
             child: _buildGradientCard(
               context,
               ref.tr('expenses'),
-              '...',
+              '${finance['expense']?.toInt() ?? 0}',
               Icons.money_off_rounded,
               [const Color(0xFFE53935), const Color(0xFFE35D5B)],
             ),
           ),
-        ],
-      ),
-      error: (e, _) => Row(
-        children: [
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('appointments'),
-              '$appointments',
-              Icons.calendar_today_rounded,
-              [const Color(0xFF6441A5), const Color(0xFF2a0845)],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('waiting'),
-              '$waiting',
-              Icons.people_alt_rounded,
-              [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('net_income'),
-              '!',
-              Icons.account_balance_wallet_rounded,
-              [const Color(0xFF11998e), const Color(0xFF38ef7d)],
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _buildGradientCard(
-              context,
-              ref.tr('expenses'),
-              '!',
-              Icons.money_off_rounded,
-              [const Color(0xFFE53935), const Color(0xFFE35D5B)],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -358,6 +271,8 @@ class DashboardScreen extends ConsumerWidget {
     AsyncValue<List<Appointment>> appointmentsAsync,
   ) {
     return appointmentsAsync.when(
+      skipLoadingOnRefresh: true,
+      skipLoadingOnReload: true,
       data: (appointments) {
         if (appointments.isEmpty) {
           return Container(
@@ -432,7 +347,7 @@ class DashboardScreen extends ConsumerWidget {
                         showDialog(
                           context: context,
                           builder: (context) =>
-                              AddPatientScreen(patient: appt.patient),
+                              AddPatientScreen(patient: appt.patient, editOnly: true),
                         );
                       }
                     : null,
@@ -616,6 +531,37 @@ class DashboardScreen extends ConsumerWidget {
                         final patientName =
                             appt.patient?.name ?? ref.tr('unknown_patient');
 
+                        // --- NEW: Cleanup Financials and Medical Records ---
+                        if (appt.patient != null) {
+                          final patient = appt.patient!;
+                          // Find the non-finalized record (usually the one created for this appointment)
+                          final recordIndex =
+                              patient.records.indexWhere((r) => !r.isFinalized);
+
+                          if (recordIndex != -1) {
+                            final record = patient.records[recordIndex];
+
+                            // 1. Delete associated transaction if exists
+                            if (record.transactionId != null) {
+                              await ref
+                                  .read(transactionRepositoryProvider)
+                                  .deleteTransaction(
+                                    record.transactionId!,
+                                    apptClinicId,
+                                  );
+                            }
+
+                            // 2. Remove the medical record from patient profile
+                            final updatedRecords =
+                                List<MedicalRecord>.from(patient.records);
+                            updatedRecords.removeAt(recordIndex);
+                            await ref.read(patientRepositoryProvider).updatePatient(
+                                  patient.copyWith(records: updatedRecords),
+                                );
+                          }
+                        }
+
+                        // 3. Delete the appointment as usual
                         await ref
                             .read(appointmentRepositoryProvider)
                             .deleteAppointment(apptId, apptClinicId);
@@ -737,6 +683,8 @@ class DashboardScreen extends ConsumerWidget {
               await ref
                   .read(transactionRepositoryProvider)
                   .addTransaction(expense);
+              // Force immediate UI refresh
+              ref.read(transactionsRefreshProvider.notifier).refresh();
               if (context.mounted) Navigator.pop(context);
             },
             child: Text(ref.tr('save')),
@@ -747,8 +695,7 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   void _showIncomeDetailsDialog(BuildContext context, WidgetRef ref) {
-    final threshold =
-        ref.read(clinicVisibilityThresholdProvider).value ?? DateTime(2000);
+    final threshold = ref.read(clinicVisibilityThresholdProvider);
     final transactionsAsync = ref.watch(transactionsStreamProvider);
 
     showDialog(
@@ -860,8 +807,7 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   void _showExpenseDetailsDialog(BuildContext context, WidgetRef ref) {
-    final threshold =
-        ref.read(clinicVisibilityThresholdProvider).value ?? DateTime(2000);
+    final threshold = ref.read(clinicVisibilityThresholdProvider);
     final transactionsAsync = ref.watch(transactionsStreamProvider);
 
     showDialog(

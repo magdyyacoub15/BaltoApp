@@ -10,15 +10,15 @@ import 'appwrite_client.dart';
 enum SubscriptionStatus { active, trial, expired, offline }
 
 final subscriptionServiceProvider = Provider((ref) {
-  return SubscriptionService(ref.read(appwriteDatabasesProvider));
+  return SubscriptionService(ref.read(appwriteTablesDBProvider));
 });
 
 class SubscriptionService {
-  final Databases _databases;
+  final TablesDB _databases;
 
-  // Caching variables
-  SubscriptionStatus? _cachedStatus;
-  DateTime? _lastCheckTime;
+  // Caching variables — keyed by clinicId to prevent cross-clinic leakage
+  final Map<String, SubscriptionStatus> _cachedStatusMap = {};
+  final Map<String, DateTime> _lastCheckTimeMap = {};
   static const Duration _cacheDuration = Duration(hours: 12);
 
   SubscriptionService(this._databases);
@@ -61,12 +61,14 @@ class SubscriptionService {
   }) async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. Return memory-cached status if valid
+    // 1. Return memory-cached status if valid (keyed by clinicId)
+    final cachedStatus = _cachedStatusMap[clinicId];
+    final lastCheckTime = _lastCheckTimeMap[clinicId];
     if (!forceRefresh &&
-        _cachedStatus != null &&
-        _lastCheckTime != null &&
-        DateTime.now().difference(_lastCheckTime!) < _cacheDuration) {
-      return _cachedStatus!;
+        cachedStatus != null &&
+        lastCheckTime != null &&
+        DateTime.now().difference(lastCheckTime) < _cacheDuration) {
+      return cachedStatus;
     }
 
     try {
@@ -93,10 +95,10 @@ class SubscriptionService {
       }
 
       // 3. Fetch from Appwrite
-      final doc = await _databases.getDocument(
+      final doc = await _databases.getRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'clinics',
-        documentId: clinicId,
+        tableId: 'clinics',
+        rowId: clinicId,
       );
 
       final data = doc.data;
@@ -117,14 +119,14 @@ class SubscriptionService {
         status = SubscriptionStatus.expired;
       }
 
-      // Update Caches
-      _cachedStatus = status;
-      _lastCheckTime = DateTime.now();
+      // Update Caches (keyed by clinicId)
+      _cachedStatusMap[clinicId] = status;
+      _lastCheckTimeMap[clinicId] = DateTime.now();
 
       await prefs.setString('sub_status_$clinicId', status.name);
       await prefs.setString(
         'sub_last_check_$clinicId',
-        _lastCheckTime!.toIso8601String(),
+        _lastCheckTimeMap[clinicId]!.toIso8601String(),
       );
 
       return status;
@@ -139,10 +141,10 @@ class SubscriptionService {
       final DateTime? networkNow = await _fetchRealTime();
       if (networkNow == null) return 0;
 
-      final doc = await _databases.getDocument(
+      final doc = await _databases.getRow(
         databaseId: appwriteDatabaseId,
-        collectionId: 'clinics',
-        documentId: clinicId,
+        tableId: 'clinics',
+        rowId: clinicId,
       );
 
       final data = doc.data;
@@ -165,10 +167,10 @@ class SubscriptionService {
   // Admin Methods
 
   Future<void> extendSubscription(String clinicId, int days) async {
-    final doc = await _databases.getDocument(
+    final doc = await _databases.getRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinicId,
+      tableId: 'clinics',
+      rowId: clinicId,
     );
 
     final data = doc.data;
@@ -190,10 +192,10 @@ class SubscriptionService {
       newEndDate = DateTime.now().add(Duration(days: days));
     }
 
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinicId,
+      tableId: 'clinics',
+      rowId: clinicId,
       data: {
         'subscriptionEndDate': newEndDate.toUtc().toIso8601String(),
         'isTrial': false, // Extending clears trial status
@@ -202,10 +204,10 @@ class SubscriptionService {
   }
 
   Future<void> updateSubscriptionDate(String clinicId, DateTime newDate) async {
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinicId,
+      tableId: 'clinics',
+      rowId: clinicId,
       data: {
         'subscriptionEndDate': newDate.toUtc().toIso8601String(),
         'isTrial': false,
@@ -214,10 +216,10 @@ class SubscriptionService {
   }
 
   Future<void> cancelSubscription(String clinicId) async {
-    await _databases.updateDocument(
+    await _databases.updateRow(
       databaseId: appwriteDatabaseId,
-      collectionId: 'clinics',
-      documentId: clinicId,
+      tableId: 'clinics',
+      rowId: clinicId,
       data: {
         // Set to yesterday to ensure it's immediately expired
         'subscriptionEndDate': DateTime.now()

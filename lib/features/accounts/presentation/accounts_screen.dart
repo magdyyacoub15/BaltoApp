@@ -15,7 +15,7 @@ class AccountsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final transactionsAsync = ref.watch(transactionsStreamProvider);
+    final transactionsAsync = ref.watch(allTransactionsStreamProvider);
 
     return Scaffold(
       body: AnimatedGradientBackground(
@@ -52,86 +52,71 @@ class AccountsScreen extends ConsumerWidget {
                   centerTitle: true,
                 ),
                 SliverPadding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate((context, index) {
-                      final monthKey = grouped.keys.elementAt(index);
-                      final monthData = grouped[monthKey]!;
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) {
+                        final monthKey = grouped.keys.elementAt(index);
+                        final monthData = grouped[monthKey]!;
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withAlpha(20),
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: Colors.white.withAlpha(30)),
-                        ),
-                        child: ExpansionTile(
-                          shape: const RoundedRectangleBorder(
-                            side: BorderSide.none,
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(20),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.white.withAlpha(30)),
                           ),
-                          collapsedIconColor: Colors.white70,
-                          iconColor: Colors.white,
-                          title: Text(
-                            monthKey,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 18,
-                              color: Colors.white,
+                          child: ExpansionTile(
+                            shape: const RoundedRectangleBorder(side: BorderSide.none),
+                            collapsedIconColor: Colors.white70,
+                            iconColor: Colors.white,
+                            title: Text(
+                              monthKey,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 18,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
-                          subtitle: _buildMonthSummary(monthData, ref),
-                          children: monthData.keys.map((dayKey) {
-                            final dayData = monthData[dayKey]!;
-                            return Container(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withAlpha(15),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: ExpansionTile(
-                                shape: const RoundedRectangleBorder(
-                                  side: BorderSide.none,
+                            subtitle: _buildMonthSummary(monthData, ref),
+                            children: monthData.keys.map((dayKey) {
+                              final dayData = monthData[dayKey]!;
+                              return Container(
+                                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withAlpha(15),
+                                  borderRadius: BorderRadius.circular(16),
                                 ),
-                                collapsedIconColor: Colors.white60,
-                                iconColor: Colors.white70,
-                                title: Text(
-                                  ref.tr('day_format', [dayKey]),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w500,
+                                child: ExpansionTile(
+                                  shape: const RoundedRectangleBorder(side: BorderSide.none),
+                                  collapsedIconColor: Colors.white60,
+                                  iconColor: Colors.white70,
+                                  title: Text(
+                                    ref.tr('day_format', [dayKey]),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
+                                  subtitle: _buildDaySummary(dayData, ref),
+                                  children: dayData
+                                      .map((t) => _buildTransactionTile(context, ref, t))
+                                      .toList(),
                                 ),
-                                subtitle: _buildDaySummary(dayData, ref),
-                                children: dayData
-                                    .map(
-                                      (t) => _buildTransactionTile(
-                                        context,
-                                        ref,
-                                        t,
-                                      ),
-                                    )
-                                    .toList(),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                      );
-                    }, childCount: grouped.keys.length),
+                              );
+                            }).toList(),
+                          ),
+                        );
+                      },
+                      childCount: grouped.keys.length,
+                    ),
                   ),
                 ),
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
               ],
             );
           },
-          loading: () => const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
+          loading: () => const Center(child: CircularProgressIndicator(color: Colors.white)),
           error: (e, st) => Center(
             child: Text(
               ref.tr('error_label', [e.toString()]),
@@ -264,30 +249,24 @@ class AccountsScreen extends ConsumerWidget {
   void _confirmDelete(BuildContext context, WidgetRef ref, AppTransaction t) {
     showDialog(
       context: context,
-      builder: (context) => DeleteConfirmationDialog(
+      builder: (dialogContext) => DeleteConfirmationDialog(
         title: ref.tr('delete_transaction_title'),
         content: ref.tr('delete_transaction_confirm'),
         onDelete: () async {
           final clinic = ref.read(clinicStreamProvider).value;
           if (clinic == null) return;
 
-          final canWrite = await ref
-              .read(permissionServiceProvider)
-              .canWrite(clinic.id);
+          final canWrite = await ref.read(permissionServiceProvider).canWrite(clinic.id);
           if (!canWrite) {
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(ref.tr('delete_transaction_error_subs')),
-                ),
+                SnackBar(content: Text(ref.tr('delete_transaction_error_subs'))),
               );
             }
             return;
           }
 
-          await ref
-              .read(transactionRepositoryProvider)
-              .deleteTransaction(t.id, clinic.id);
+          await ref.read(transactionRepositoryProvider).deleteTransaction(t.id, clinic.id);
         },
       ),
     );
@@ -368,9 +347,7 @@ class AccountsScreen extends ConsumerWidget {
                   clinicId: user.clinicId,
                 );
 
-                await ref
-                    .read(transactionRepositoryProvider)
-                    .addTransaction(transaction);
+                await ref.read(transactionRepositoryProvider).addTransaction(transaction);
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(ref.tr('save_record')),

@@ -21,3 +21,7 @@ final appwriteAccountProvider = Provider<Account>((ref) {
 final appwriteDatabasesProvider = Provider<Databases>((ref) {
   return Databases(ref.watch(appwriteClientProvider));
 });
+
+final appwriteTablesDBProvider = Provider<TablesDB>((ref) {
+  return TablesDB(ref.watch(appwriteClientProvider));
+});
