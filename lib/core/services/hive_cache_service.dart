@@ -106,17 +106,16 @@ class HiveCacheService {
     return (data as List).cast<Map<String, dynamic>>();
   }
 
-  // ─── Clinic / User Data ────────────────────────────────────────────────────
+  // ─── Clinic / User Data / Lists ───────────────────────────────────────────
 
-  void cacheValue(String key, Map<String, dynamic> data) {
+  void cacheValue(String key, dynamic data) {
     Hive.box<String>(_clinicBoxName).put(key, json.encode(_wrap(data)));
   }
 
-  Map<String, dynamic>? getCachedValue(String key) {
+  dynamic getCachedValue(String key) {
     final raw = Hive.box<String>(_clinicBoxName).get(key);
     final data = _unwrap(raw);
-    if (data == null) return null;
-    return data as Map<String, dynamic>;
+    return data;
   }
 
   void removeCachedValue(String key) {

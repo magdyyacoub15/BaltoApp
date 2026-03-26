@@ -6,10 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
 import 'dart:ui';
-import '../../../core/services/cleanup_service.dart';
 import '../../../core/services/appwrite_client.dart';
 import '../../../core/services/subscription_service.dart';
 import '../../../core/localization/language_provider.dart';
+import '../../../core/services/update_service.dart';
 
 class SuperAdminPage extends ConsumerStatefulWidget {
   const SuperAdminPage({super.key});
@@ -27,6 +27,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
   AnimationController? _animationController;
   int _totalUsersCount = 0;
   int _totalClinicsCount = 0;
+  Map<String, String> _adminEmails = {};
 
   @override
   void initState() {
@@ -76,8 +77,31 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
         queries: [Query.orderDesc('createdAt')],
       );
 
+      final adminIds = snapshot.rows
+          .map((doc) => doc.data['adminId']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .toSet()
+          .toList();
+
+      Map<String, String> emailsMap = {};
+      if (adminIds.isNotEmpty) {
+        try {
+          final usersSnapshot = await databases.listRows(
+            databaseId: appwriteDatabaseId,
+            tableId: 'users',
+            queries: [Query.equal('\$id', adminIds), Query.limit(adminIds.length)],
+          );
+          for (var userDoc in usersSnapshot.rows) {
+            emailsMap[userDoc.$id] = userDoc.data['email'] ?? '';
+          }
+        } catch (e) {
+          debugPrint("Error fetching admin emails: $e");
+        }
+      }
+
       if (mounted) {
         setState(() {
+          _adminEmails = emailsMap;
           _clinics = snapshot.rows;
           _filteredClinics = snapshot.rows;
           _isLoading = false;
@@ -107,7 +131,10 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
       _filteredClinics = _clinics.where((doc) {
         final data = doc.data;
         final name = (data['name'] ?? '').toString().toLowerCase();
-        final email = (data['adminEmail'] ?? '').toString().toLowerCase();
+        final adminId = data['adminId']?.toString() ?? '';
+        final email = (data['adminEmail'] ?? _adminEmails[adminId] ?? '')
+            .toString()
+            .toLowerCase();
         final code = (data['clinicCode'] ?? '').toString().toLowerCase();
         final searchLower = query.toLowerCase();
 
@@ -140,21 +167,27 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
             children: [
               Icon(icon, color: color, size: 28),
               const SizedBox(height: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  color: color.withAlpha(200),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: color.withAlpha(200),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  value,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -188,6 +221,14 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                 ),
                 centerTitle: true,
                 iconTheme: const IconThemeData(color: Colors.white),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.system_update_alt, color: Colors.amber),
+                    onPressed: () => _showOtaUpdateDialog(context),
+                    tooltip: ref.tr('ota_management_title'),
+                  ),
+                  const SizedBox(width: 8),
+                ],
               ),
               SliverToBoxAdapter(
                 child: Column(
@@ -255,7 +296,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                         ),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),
@@ -288,8 +329,10 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                       final doc = _filteredClinics[index];
                       final data = doc.data;
                       final String name = data['name'] ?? ref.tr('no_name');
-                      final String email =
-                          data['adminEmail'] ?? ref.tr('no_email');
+                      final String adminId = data['adminId']?.toString() ?? '';
+                      final String email = data['adminEmail'] ??
+                          _adminEmails[adminId] ??
+                          ref.tr('no_email');
                       final String code =
                           data['clinicCode'] ?? ref.tr('not_available');
                       final bool isTrial = data['isTrial'] ?? false;
@@ -364,12 +407,15 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                                       color: Colors.blueGrey,
                                     ),
                                     const SizedBox(width: 4),
-                                    Text(
-                                      ref.tr('status_label', [statusText]),
-                                      style: const TextStyle(
-                                        color: Colors.blueGrey,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
+                                    Expanded(
+                                      child: Text(
+                                        ref.tr('status_label', [statusText]),
+                                        style: const TextStyle(
+                                          color: Colors.blueGrey,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],
@@ -383,18 +429,21 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                                       color: Colors.blue.shade700,
                                     ),
                                     const SizedBox(width: 4),
-                                    Text(
-                                      ref.tr('expires_on', [
-                                        endDate != null
-                                            ? DateFormat(
-                                                'yyyy-MM-dd',
-                                              ).format(endDate)
-                                            : ref.tr('not_set'),
-                                      ]),
-                                      style: TextStyle(
-                                        color: Colors.blue.shade700,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
+                                    Expanded(
+                                      child: Text(
+                                        ref.tr('expires_on', [
+                                          endDate != null
+                                              ? DateFormat(
+                                                  'yyyy-MM-dd',
+                                                ).format(endDate)
+                                              : ref.tr('not_set'),
+                                        ]),
+                                        style: TextStyle(
+                                          color: Colors.blue.shade700,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
                                   ],
@@ -465,13 +514,14 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
                                       ),
                                     ),
                                     const SizedBox(height: 12),
-                                    Row(
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      alignment: WrapAlignment.start,
                                       children: [
                                         _buildEditDateButton(doc.$id, endDate),
                                         _buildCustomDaysButton(doc.$id),
                                         _buildCancelButton(doc.$id),
-                                        const Spacer(),
-                                        _buildDeleteSystemButton(doc.$id, name),
                                       ],
                                     ),
                                   ],
@@ -511,19 +561,6 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
     );
   }
 
-  Widget _buildDeleteSystemButton(String clinicId, String clinicName) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.delete_forever, color: Colors.red, size: 28),
-        tooltip: ref.tr('delete_entire_system'),
-        onPressed: () => _showDeleteConfirmation(clinicId, clinicName),
-      ),
-    );
-  }
 
   Widget _buildPremiumBackground() {
     return Container(
@@ -602,168 +639,7 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
     );
   }
 
-  void _showDeleteConfirmation(String clinicId, String clinicName) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => _DeleteConfirmationDialog(
-        clinicId: clinicId,
-        clinicName: clinicName,
-        onDelete: _deleteEntireSystemData,
-      ),
-    );
-  }
 
-  Future<void> _deleteEntireSystemData(
-    String clinicId, {
-    required Function(String) onProgress,
-  }) async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final subcollections = [
-        'patients',
-        'appointments',
-        'expenses', // Let's pretend expenses is transactions or we just delete users
-        'users_roles',
-      ];
-
-      int currentStep = 0;
-      final totalSteps = subcollections.length + 1;
-      final databases = ref.read(appwriteTablesDBProvider);
-
-      // 1. Delete Patients
-      currentStep++;
-      onProgress(
-        ref.tr('deleting_patients_records', [
-          currentStep.toString(),
-          totalSteps.toString(),
-        ]),
-      );
-
-      final patientsSnapshot = await databases.listRows(
-        databaseId: appwriteDatabaseId,
-        tableId: 'patients',
-        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
-      );
-
-      int deletedPatients = 0;
-      for (var patient in patientsSnapshot.rows) {
-        await databases.deleteRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'patients',
-          rowId: patient.$id,
-        );
-        deletedPatients++;
-        onProgress(
-          ref.tr('deleting_patients_count', [deletedPatients.toString()]),
-        );
-      }
-
-      // 2. Delete Appointments
-      currentStep++;
-      onProgress(
-        ref.tr('deleting_appointments', [
-          currentStep.toString(),
-          totalSteps.toString(),
-        ]),
-      );
-      final appointmentsSnapshot = await databases.listRows(
-        databaseId: appwriteDatabaseId,
-        tableId: 'appointments',
-        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
-      );
-      for (var doc in appointmentsSnapshot.rows) {
-        await databases.deleteRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'appointments',
-          rowId: doc.$id,
-        );
-      }
-
-      // 3. Delete Expenses / Transactions
-      currentStep++;
-      onProgress(
-        ref.tr('deleting_expenses', [
-          currentStep.toString(),
-          totalSteps.toString(),
-        ]),
-      );
-      final expensesSnapshot = await databases.listRows(
-        databaseId: appwriteDatabaseId,
-        tableId: 'transactions',
-        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
-      );
-      for (var doc in expensesSnapshot.rows) {
-        await databases.deleteRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'transactions',
-          rowId: doc.$id,
-        );
-      }
-
-      // 4. Reset User Roles (detach users from this clinic)
-      currentStep++;
-      onProgress(
-        ref.tr('resetting_permissions', [
-          currentStep.toString(),
-          totalSteps.toString(),
-        ]),
-      );
-      final usersSnapshot = await databases.listRows(
-        databaseId: appwriteDatabaseId,
-        tableId: 'users',
-        queries: [Query.equal('clinicId', clinicId), Query.limit(100)],
-      );
-      for (var user in usersSnapshot.rows) {
-        // Here we just mark them as unapproved and remove clinicId if possible
-        await databases.updateRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'users',
-          rowId: user.$id,
-          data: {'clinicId': '', 'isApproved': false},
-        );
-      }
-
-      // 5. Delete Clinic Final Store Data (Images, Backups, etc.)
-      currentStep++;
-      onProgress(
-        ref.tr('cleaning_up_storage', [
-          currentStep.toString(),
-          totalSteps.toString(),
-        ]),
-      );
-      // Assuming storage path is organized by clinicId
-      await ref
-          .read(cleanupServiceProvider)
-          .deleteStorageFolder('clinics/$clinicId');
-
-      // 6. Delete Clinic Document
-      await databases.deleteRow(
-        databaseId: appwriteDatabaseId,
-        tableId: 'clinics',
-        rowId: clinicId,
-      );
-
-      if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(ref.tr('delete_clinic_success')),
-            backgroundColor: Colors.green,
-          ),
-        );
-        _fetchClinics(showLoading: false);
-      }
-    } catch (e) {
-      if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(ref.tr('delete_clinic_error', [e.toString()])),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
 
   Widget _buildExtendButton(String clinicId, String label, int days) {
     final subService = ref.read(subscriptionServiceProvider);
@@ -937,136 +813,212 @@ class _SuperAdminPageState extends ConsumerState<SuperAdminPage>
       ),
     );
   }
+
+  void _showOtaUpdateDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const _OtaUpdateDialog(),
+    );
+  }
 }
 
-class _DeleteConfirmationDialog extends ConsumerStatefulWidget {
-  final String clinicId;
-  final String clinicName;
-  final Future<void> Function(String, {required Function(String) onProgress})
-  onDelete;
 
-  const _DeleteConfirmationDialog({
-    required this.clinicId,
-    required this.clinicName,
-    required this.onDelete,
-  });
+class _OtaUpdateDialog extends ConsumerStatefulWidget {
+  const _OtaUpdateDialog();
 
   @override
-  ConsumerState<_DeleteConfirmationDialog> createState() =>
-      _DeleteConfirmationDialogState();
+  ConsumerState<_OtaUpdateDialog> createState() => __OtaUpdateDialogState();
 }
 
-class _DeleteConfirmationDialogState
-    extends ConsumerState<_DeleteConfirmationDialog> {
-  bool _isDeleting = false;
-  String _progressMessage = '';
-  final TextEditingController _confirmController = TextEditingController();
+class __OtaUpdateDialogState extends ConsumerState<_OtaUpdateDialog> {
+  final _codeController = TextEditingController();
+  final _urlController = TextEditingController();
+  final _changelogController = TextEditingController();
+  bool _isLoading = false;
+  bool _isSaving = false;
 
   @override
-  void dispose() {
-    _confirmController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _loadCurrentConfig();
+  }
+
+  Future<void> _loadCurrentConfig() async {
+    setState(() => _isLoading = true);
+    try {
+      final updateInfo = await ref.read(updateServiceProvider).getUpdateInfo();
+      if (updateInfo != null) {
+        _codeController.text = updateInfo.updateCode.toString();
+        _urlController.text = updateInfo.apkUrl;
+        _changelogController.text = updateInfo.changelog;
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _saveConfig() async {
+    final codeText = _codeController.text.trim();
+    final code = int.tryParse(codeText) ?? 0;
+
+    if (code == 0 || _urlController.text.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter valid data')),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final databases = ref.read(appwriteTablesDBProvider);
+      final updateData = {
+        'updateCode': code,
+        'apkUrl': _urlController.text.trim(),
+        'changelog': _changelogController.text.trim(),
+      };
+
+      try {
+        await databases.updateRow(
+          databaseId: appwriteDatabaseId,
+          tableId: 'config',
+          rowId: 'update_info',
+          data: updateData,
+        );
+      } catch (e) {
+        if (e.toString().contains('404') || e.toString().contains('not_found')) {
+          await databases.createRow(
+            databaseId: appwriteDatabaseId,
+            tableId: 'config',
+            rowId: 'update_info',
+            data: updateData,
+          );
+        } else {
+          rethrow;
+        }
+      }
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ref.tr('update_saved_success'))),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer(
-      builder: (context, ref, child) {
-        return AlertDialog(
-          title: Text(
-            ref.tr('extreme_caution'),
-            style: const TextStyle(
-              color: Colors.red,
-              fontWeight: FontWeight.bold,
+    return AlertDialog(
+      backgroundColor: const Color(0xFF0D47A1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      title: Row(
+        children: [
+          const Icon(Icons.system_update_alt, color: Colors.amber),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              ref.tr('ota_management_title'),
+              style: const TextStyle(color: Colors.white, fontSize: 18),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(ref.tr('delete_system_warning', [widget.clinicName])),
-              const SizedBox(height: 15),
-              Text(
-                ref.tr('irreversible_action'),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 15),
-              if (!_isDeleting) ...[
-                Text(ref.tr('type_to_confirm', [widget.clinicName])),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _confirmController,
-                  decoration: InputDecoration(
-                    hintText: widget.clinicName,
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-              ] else ...[
-                const Center(
-                  child: CircularProgressIndicator(color: Colors.red),
-                ),
-                const SizedBox(height: 12),
-                Center(
-                  child: Text(
-                    _progressMessage,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          actions: _isDeleting
-              ? []
-              : [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(ref.tr('cancel')),
-                  ),
-                  ElevatedButton(
-                    onPressed: _confirmController.text == widget.clinicName
-                        ? () async {
-                            setState(() {
-                              _isDeleting = true;
-                              _progressMessage = ref.tr('initializing_delete');
-                            });
-                            try {
-                              await widget.onDelete(
-                                widget.clinicId,
-                                onProgress: (msg) {
-                                  if (mounted) {
-                                    setState(() => _progressMessage = msg);
-                                  }
-                                },
-                              );
-                              if (!context.mounted) return;
-                              Navigator.pop(context);
-                            } catch (e) {
-                              if (mounted) {
-                                setState(() {
-                                  _isDeleting = false;
-                                  _progressMessage = '';
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      ref.tr('delete_error', [e.toString()]),
-                                    ),
-                                  ),
-                                );
-                              }
-                            }
-                          }
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: Text(ref.tr('delete_everything')),
+        ],
+      ),
+      content: _isLoading
+          ? const SizedBox(
+              height: 200,
+              child: Center(child: CircularProgressIndicator(color: Colors.white)),
+            )
+          : SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildField(_codeController, ref.tr('update_code_label'), true),
+                  const SizedBox(height: 16),
+                  _buildField(_urlController, ref.tr('apk_url_label'), false),
+                  const SizedBox(height: 16),
+                  _buildField(
+                    _changelogController,
+                    ref.tr('changelog_label'),
+                    false,
+                    maxLines: 4,
                   ),
                 ],
-        );
-      },
+              ),
+            ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child:
+              Text(ref.tr('cancel'), style: const TextStyle(color: Colors.white70)),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _saveConfig,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.amber,
+            foregroundColor: Colors.black,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: _isSaving
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(ref.tr('save_update_button')),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildField(
+    TextEditingController controller,
+    String label,
+    bool isNumber, {
+    int maxLines = 1,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.amber,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+          maxLines: maxLines,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            labelStyle: const TextStyle(color: Colors.white70),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: Colors.white.withAlpha(50)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderSide: const BorderSide(color: Colors.amber, width: 2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            filled: true,
+            fillColor: Colors.white.withAlpha(10),
+          ),
+        ),
+      ],
     );
   }
 }

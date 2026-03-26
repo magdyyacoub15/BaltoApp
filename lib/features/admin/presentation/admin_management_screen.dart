@@ -1,9 +1,6 @@
-// ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:appwrite/appwrite.dart';
-import 'package:appwrite/models.dart' as models;
 import '../../auth/presentation/auth_providers.dart';
 import '../../auth/data/auth_repository.dart';
 import '../../auth/domain/models/app_user.dart';
@@ -109,11 +106,16 @@ class AdminManagementScreen extends ConsumerWidget {
                   ref
                       .watch(clinicStreamProvider)
                       .when(
+                        skipLoadingOnRefresh: true,
+                        skipLoadingOnReload: true,
                         data: (clinic) {
                           final code =
                               clinic?.clinicCode ?? ref.tr('not_available');
-                          return Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 12,
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -134,28 +136,32 @@ class AdminManagementScreen extends ConsumerWidget {
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 16),
-                              IconButton(
-                                icon: const Icon(Icons.refresh),
-                                color: Colors.green,
-                                tooltip: ref.tr('change_code'),
-                                onPressed: () => _showChangeCodeDialog(
-                                  context,
-                                  ref,
-                                  adminUser.clinicId,
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.copy),
-                                color: Colors.blue,
-                                onPressed: () {
-                                  Clipboard.setData(ClipboardData(text: code));
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(ref.tr('code_copied')),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.refresh),
+                                    color: Colors.green,
+                                    tooltip: ref.tr('change_code'),
+                                    onPressed: () => _showChangeCodeDialog(
+                                      context,
+                                      ref,
+                                      adminUser.clinicId,
                                     ),
-                                  );
-                                },
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.copy),
+                                    color: Colors.blue,
+                                    onPressed: () {
+                                      Clipboard.setData(ClipboardData(text: code));
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(ref.tr('code_copied')),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
                               ),
                             ],
                           );
@@ -182,28 +188,10 @@ class AdminManagementScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 16),
 
-          FutureBuilder<models.RowList>(
-            future: ref
-                .read(appwriteTablesDBProvider)
-                .listRows(
-                  databaseId: appwriteDatabaseId,
-                  tableId: 'users',
-                  queries: [Query.equal('clinicId', adminUser.clinicId)],
-                ),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Text(ref.tr('error_label', [snapshot.error.toString()]));
-              }
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(color: Colors.white),
-                );
-              }
-
-              final users = snapshot.data!.rows
-                  .map((doc) => AppUser.fromMap(doc.data, doc.$id))
-                  .toList();
-
+          ref.watch(clinicEmployeesStreamProvider).when(
+            skipLoadingOnRefresh: true,
+            skipLoadingOnReload: true,
+            data: (users) {
               return ListView.builder(
                 shrinkWrap: true,
                 padding: EdgeInsets.zero,
@@ -213,43 +201,142 @@ class AdminManagementScreen extends ConsumerWidget {
                   final employee = users[index];
                   final isMe = employee.id == adminUser.id;
 
-                  return Card(
-                    color: Colors.white.withAlpha(25),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(20),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: Colors.white.withAlpha(30),
+                        width: 1,
+                      ),
                     ),
-                    child: ListTile(
-                      leading: Icon(
-                        employee.isAdmin
-                            ? Icons.admin_panel_settings
-                            : Icons.person_outline,
-                        color: employee.isAdmin
-                            ? Colors.orangeAccent
-                            : Colors.white70,
-                      ),
-                      title: Text(
-                        employee.name + (isMe ? ref.tr('you') : ''),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '${employee.email} | ${employee.phone}',
-                        style: const TextStyle(color: Colors.white60),
-                      ),
-                      trailing: isMe
-                          ? Chip(label: Text(ref.tr('system_admin')))
-                          : PopupMenuButton<String>(
+                    child: Padding(
+                      padding: const EdgeInsets.all(12.0),
+                      child: Row(
+                        children: [
+                          // Left Section: Avatar/Icon
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: employee.isAdmin
+                                  ? Colors.orange.withAlpha(40)
+                                  : Colors.blue.withAlpha(40),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              employee.isAdmin
+                                  ? Icons.admin_panel_settings
+                                  : Icons.person_outline,
+                              color: employee.isAdmin
+                                  ? Colors.orangeAccent
+                                  : Colors.blueAccent,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          
+                          // Middle Section: Info
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        employee.name,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (isMe)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        margin: const EdgeInsets.only(left: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.withAlpha(60),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          ref.tr('you'),
+                                          style: const TextStyle(color: Colors.greenAccent, fontSize: 10),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  employee.email,
+                                  style: TextStyle(color: Colors.white.withAlpha(150), fontSize: 13),
+                                ),
+                                const SizedBox(height: 6),
+                                
+                                // Visibility Indicators
+                                if (!employee.isAdmin)
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Wrap(
+                                        spacing: 8,
+                                        runSpacing: 4,
+                                        children: [
+                                          _buildPermissionBadge(
+                                            icon: Icons.account_balance_wallet_outlined,
+                                            label: 'الحسابات',
+                                            isActive: employee.canViewAccounts,
+                                          ),
+                                          _buildPermissionBadge(
+                                            icon: Icons.people_outline,
+                                            label: 'المرضى',
+                                            isActive: employee.canViewPatients,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          
+                          // Right Section: Action
+                          if (!isMe)
+                            PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, color: Colors.white70),
                               onSelected: (newValue) async {
-                                await ref
-                                    .read(appwriteTablesDBProvider)
-                                    .updateRow(
-                                      databaseId: appwriteDatabaseId,
-                                      tableId: 'users',
-                                      rowId: employee.id,
-                                      data: {'role': newValue},
-                                    );
+                                if (newValue == 'remove') {
+                                  _confirmRemoveUser(context, ref, employee, adminUser.clinicId);
+                                  return;
+                                }
+                                if (newValue == 'toggle_accounts') {
+                                  await ref.read(appwriteTablesDBProvider).updateRow(
+                                    databaseId: appwriteDatabaseId,
+                                    tableId: 'users',
+                                    rowId: employee.id,
+                                    data: {'canViewAccounts': !employee.canViewAccounts},
+                                  );
+                                  return;
+                                }
+                                if (newValue == 'toggle_patients') {
+                                  await ref.read(appwriteTablesDBProvider).updateRow(
+                                    databaseId: appwriteDatabaseId,
+                                    tableId: 'users',
+                                    rowId: employee.id,
+                                    data: {'canViewPatients': !employee.canViewPatients},
+                                  );
+                                  return;
+                                }
+                                await ref.read(appwriteTablesDBProvider).updateRow(
+                                  databaseId: appwriteDatabaseId,
+                                  tableId: 'users',
+                                  rowId: employee.id,
+                                  data: {'role': newValue},
+                                );
                               },
                               itemBuilder: (context) => [
                                 PopupMenuItem(
@@ -260,28 +347,60 @@ class AdminManagementScreen extends ConsumerWidget {
                                   value: 'secretary',
                                   child: Text(ref.tr('change_to_secretary')),
                                 ),
-                              ],
-                              child: Chip(
-                                label: Text(
-                                  employee.isAdmin
-                                      ? ref.tr('admin')
-                                      : ref.tr('secretary'),
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'toggle_accounts',
+                                  child: Text(
+                                    employee.canViewAccounts
+                                        ? 'إخفاء صفحة الحسابات'
+                                        : 'إظهار صفحة الحسابات',
+                                    style: TextStyle(
+                                      color: employee.canViewAccounts ? Colors.orange : Colors.green,
+                                    ),
                                   ),
                                 ),
-                                backgroundColor: employee.isAdmin
-                                    ? Colors.orange.withAlpha(100)
-                                    : Colors.blue.withAlpha(100),
-                                side: BorderSide.none,
-                              ),
+                                PopupMenuItem(
+                                  value: 'toggle_patients',
+                                  child: Text(
+                                    employee.canViewPatients
+                                        ? 'إخفاء صفحة المرضى'
+                                        : 'إظهار صفحة المرضى',
+                                    style: TextStyle(
+                                      color: employee.canViewPatients ? Colors.orange : Colors.green,
+                                    ),
+                                  ),
+                                ),
+                                const PopupMenuDivider(),
+                                const PopupMenuItem(
+                                  value: 'remove',
+                                  child: Text('حذف الموظف', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            )
+                          else
+                            Container(
+                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                               decoration: BoxDecoration(
+                                 color: Colors.orange.withAlpha(60),
+                                 borderRadius: BorderRadius.circular(12),
+                               ),
+                               child: Text(ref.tr('admin'), style: const TextStyle(color: Colors.orangeAccent, fontSize: 12, fontWeight: FontWeight.bold)),
                             ),
+                        ],
+                      ),
                     ),
                   );
                 },
               );
             },
+            loading: () => const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20.0),
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+            ),
+            error: (err, _) =>
+                Text(ref.tr('error_label', [err.toString()]), style: const TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -293,130 +412,121 @@ class AdminManagementScreen extends ConsumerWidget {
     WidgetRef ref,
     AppUser adminUser,
   ) {
-    return FutureBuilder<models.RowList>(
-      future: ref
-          .read(appwriteTablesDBProvider)
-          .listRows(
-            databaseId: appwriteDatabaseId,
-            tableId: 'users',
-            queries: [
-              Query.equal('clinicId', adminUser.clinicId),
-              Query.equal('isApproved', false),
-            ],
-          ),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData || snapshot.data!.rows.isEmpty) {
-          return const SizedBox.shrink();
-        }
+    return ref.watch(pendingUsersStreamProvider).when(
+          skipLoadingOnRefresh: true,
+          skipLoadingOnReload: true,
+          data: (pendingUsers) {
+            if (pendingUsers.isEmpty) {
+              return const SizedBox.shrink();
+            }
 
-        final pendingUsers = snapshot.data!.rows;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.orange.shade200),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withAlpha(30),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.orangeAccent.withAlpha(50)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.notification_important,
-                        color: Colors.orange.shade800,
+                      Row(
+                        children: [
+                          const Icon(Icons.group_add, color: Colors.orangeAccent),
+                          const SizedBox(width: 12),
+                          Text(
+                            ref.tr('pending_join_requests', [
+                              pendingUsers.length.toString(),
+                            ]),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        ref.tr('pending_join_requests', [
-                          pendingUsers.length.toString(),
-                        ]),
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange.shade900,
-                        ),
-                      ),
+                      const SizedBox(height: 16),
+                      ...pendingUsers.map((user) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(15),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            leading: CircleAvatar(
+                              backgroundColor: Colors.orange.withAlpha(60),
+                              child: const Icon(Icons.person, color: Colors.orangeAccent),
+                            ),
+                            title: Text(user.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                            subtitle: Text(user.phone, style: TextStyle(color: Colors.white.withAlpha(150), fontSize: 12)),
+                            trailing: Wrap(
+                              spacing: 0,
+                              runSpacing: 0,
+                              alignment: WrapAlignment.end,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.check_circle, color: Colors.greenAccent),
+                                  onPressed: () => _confirmApprove(context, ref, user),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.cancel, color: Colors.redAccent),
+                                  onPressed: () => _confirmReject(context, ref, user),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  ...pendingUsers.map((doc) {
-                    final user = AppUser.fromMap(doc.data, doc.$id);
-                    return Card(
-                      color: Colors.white.withAlpha(40),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        title: Text(
-                          user.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        subtitle: Text(
-                          user.email,
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(
-                                Icons.check_circle,
-                                color: Colors.green,
-                              ),
-                              onPressed: () async {
-                                final clinic = ref
-                                    .read(clinicStreamProvider)
-                                    .value;
-                                if (clinic == null) return;
-
-                                final canWrite = await ref
-                                    .read(permissionServiceProvider)
-                                    .canWrite(clinic.id);
-                                if (!canWrite) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          ref.tr('accept_employee_error_subs'),
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                  return;
-                                }
-
-                                await ref
-                                    .read(authRepositoryProvider)
-                                    .approveUser(user.id);
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.cancel, color: Colors.red),
-                              onPressed: () =>
-                                  _confirmReject(context, ref, user),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-                ],
-              ),
+                ),
+                const SizedBox(height: 24),
+              ],
+            );
+          },
+          loading: () => const Center(
+            child: Padding(
+              padding: EdgeInsets.all(20.0),
+              child: CircularProgressIndicator(color: Colors.white),
             ),
-            const SizedBox(height: 24),
-          ],
+          ),
+          error: (err, _) => const SizedBox.shrink(),
         );
-      },
-    );
+  }
+
+  Future<void> _confirmApprove(
+    BuildContext context,
+    WidgetRef ref,
+    AppUser user,
+  ) async {
+    final clinic = ref.read(clinicStreamProvider).value;
+    if (clinic == null) return;
+
+    final canWrite = await ref
+        .read(permissionServiceProvider)
+        .canWrite(clinic.id);
+    if (!canWrite) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ref.tr('accept_employee_error_subs'))),
+        );
+      }
+      return;
+    }
+
+    await ref.read(authRepositoryProvider).approveUser(user.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تمت الموافقة على الموظف ${user.name} بنجاح')),
+      );
+    }
   }
 
   Future<void> _confirmReject(
@@ -447,6 +557,50 @@ class AdminManagementScreen extends ConsumerWidget {
           }
 
           await ref.read(authRepositoryProvider).rejectUser(user.id);
+        },
+      ),
+    );
+  }
+
+  Future<void> _confirmRemoveUser(
+    BuildContext context,
+    WidgetRef ref,
+    AppUser user,
+    String clinicId,
+  ) async {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => DeleteConfirmationDialog(
+        title: 'حذف الموظف',
+        content: 'هل أنت متأكد من حذف الموظف "${user.name}" من نظام العيادة النهائي؟ هذا الإجراء لا يمكن التراجع عنه.',
+        deleteButtonText: 'حذف نهائياً',
+        onDelete: () async {
+          final canWrite = await ref
+              .read(permissionServiceProvider)
+              .canWrite(clinicId);
+          if (!canWrite) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('الخدمة غير متاحة (تحقق من الاشتراك والإنترنت)')),
+              );
+            }
+            return;
+          }
+
+          try {
+            await ref.read(authRepositoryProvider).removeUserFromClinic(user.id, clinicId);
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                 SnackBar(content: Text('تم حذف الموظف ${user.name} بنجاح')),
+              );
+            }
+          } catch (e) {
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                 SnackBar(content: Text('حدث خطأ أثناء الحذف: $e')),
+              );
+            }
+          }
         },
       ),
     );
@@ -532,5 +686,46 @@ class AdminManagementScreen extends ConsumerWidget {
         ).showSnackBar(SnackBar(content: Text(ref.tr('code_updated_success'))));
       }
     }
+  }
+
+  Widget _buildPermissionBadge({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isActive
+            ? Colors.green.withAlpha(40)
+            : Colors.red.withAlpha(40),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isActive
+              ? Colors.greenAccent.withAlpha(80)
+              : Colors.redAccent.withAlpha(80),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: isActive ? Colors.greenAccent : Colors.redAccent,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: isActive ? Colors.greenAccent : Colors.redAccent,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

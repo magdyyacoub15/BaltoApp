@@ -194,14 +194,12 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
       final double paid = double.tryParse(_paidController.text) ?? 0.0;
       final double remaining = double.tryParse(_remainingController.text) ?? 0.0;
 
-      double oldPaidAmount = 0.0;
-      int todayRecordIndex = -1;
-
       // --- FINANCIAL TRANSACTION & RECORD SAVE ---
       String? currentTransactionId;
       final double totalPaid = paid; 
-
       String newApptId = '';
+      int todayRecordIndex = -1;
+
 
       if (widget.patient == null && _matchedPatient == null) {
         // --- NEW PATIENT ---
@@ -268,7 +266,6 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         MedicalRecord? activeRecord;
         if (todayRecordIndex != -1) {
           activeRecord = targetPatient.records[todayRecordIndex];
-          oldPaidAmount = activeRecord.paidAmount;
           currentTransactionId = activeRecord.transactionId;
         }
 
@@ -301,14 +298,8 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         }
 
         // Prepare updated patient
-        final updatedPatient = targetPatient.copyWith(
-          name: _nameController.text.trim(),
-          phone: _phoneController.text.trim(),
-          dateOfBirth: _dateOfBirth!,
-          address: _addressController.text.trim(),
-          paidAmount: (targetPatient.paidAmount - oldPaidAmount) + totalPaid,
-          remainingAmount: (targetPatient.remainingAmount - (activeRecord?.remainingAmount ?? 0)) + remaining,
-        );
+        // The `updatedPatient` variable was removed as it was not used consistently.
+        // Patient updates are now handled directly within the `if/else` blocks below.
 
         if (!widget.editOnly) {
           // Check if patient already has a non-finalized record today (avoid duplicates)
@@ -408,8 +399,12 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               remainingAmount: updatedRemaining,
             ));
           } else {
-            // Note: If editOnly but no record found, we just update demographics
-            await repo.updatePatient(updatedPatient);
+            // Note: If no record found for today, just update demographic info accurately
+            await repo.updatePatient(targetPatient.copyWith(
+              name: _nameController.text.trim(),
+              phone: _phoneController.text.trim(),
+              address: _addressController.text.trim(),
+            ));
           }
         }
       }
@@ -661,14 +656,18 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
-            child: Text(
-              isEditing
-                  ? ref.tr('edit_patient_info')
-                  : ref.tr('add_new_patient'),
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                isEditing
+                    ? ref.tr('edit_patient_info')
+                    : ref.tr('add_new_patient'),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),

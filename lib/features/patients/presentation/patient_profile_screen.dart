@@ -20,6 +20,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../../core/presentation/widgets/full_screen_image_viewer.dart';
 import '../../../core/localization/language_provider.dart';
 import 'prescription_preview_screen.dart';
+import 'debt_payment_dialog.dart';
 
 class PatientProfileScreen extends ConsumerStatefulWidget {
   final Patient patient;
@@ -538,6 +539,17 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                         _buildSmallFinanceInfo(
                           '${ref.tr('remaining')}: ${record.remainingAmount}',
                           Colors.red,
+                          onTap: () {
+                            if (record.remainingAmount > 0) {
+                              showDialog(
+                                context: context,
+                                builder: (context) => DebtPaymentDialog(
+                                  patient: p,
+                                  record: record,
+                                ),
+                              );
+                            }
+                          },
                         ),
                       ],
                     ),
@@ -922,19 +934,23 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
     );
   }
 
-  Widget _buildSmallFinanceInfo(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
+  Widget _buildSmallFinanceInfo(String text, Color color, {VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );

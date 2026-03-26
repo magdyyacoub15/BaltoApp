@@ -1,5 +1,6 @@
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../services/update_service.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/signup_screen.dart';
 import '../../features/auth/presentation/join_clinic_screen.dart';
@@ -14,7 +15,9 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/splash',
     redirect: (context, state) {
-      if (authState.isLoading) return '/splash';
+      final isUpdateChecked = ref.watch(isUpdateCheckedProvider);
+      
+      if (!isUpdateChecked || authState.isLoading) return '/splash';
 
       final isAuth = authState.value != null;
       final isLoggingIn =
@@ -29,18 +32,15 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       final userProviderState = ref.watch(currentUserProvider);
 
-      // If logged in but user data is still loading
       if (userProviderState.isLoading) {
         return isSplash ? null : '/splash';
       }
 
       final user = userProviderState.value;
       if (user == null) {
-        // Document didn't exist or errored.
         return isLoggingIn ? null : '/login';
       }
 
-      // Check approval status
       if (!user.isApproved) {
         if (state.matchedLocation != '/waiting-approval') {
           return '/waiting-approval';

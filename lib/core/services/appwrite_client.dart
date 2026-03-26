@@ -25,3 +25,7 @@ final appwriteDatabasesProvider = Provider<Databases>((ref) {
 final appwriteTablesDBProvider = Provider<TablesDB>((ref) {
   return TablesDB(ref.watch(appwriteClientProvider));
 });
+
+final appwriteTeamsProvider = Provider<Teams>((ref) {
+  return Teams(ref.watch(appwriteClientProvider));
+});

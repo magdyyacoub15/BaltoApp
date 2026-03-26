@@ -12,6 +12,7 @@ import '../../auth/presentation/auth_providers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../../../core/localization/language_provider.dart';
+import 'debt_payment_dialog.dart';
 
 class PatientsListScreen extends ConsumerStatefulWidget {
   const PatientsListScreen({super.key});
@@ -318,6 +319,8 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                 ),
               ),
               ...patientsAsync.when(
+                skipLoadingOnRefresh: true,
+                skipLoadingOnReload: true,
                 data: (patients) {
                   if (patients.isEmpty) {
                     return [SliverToBoxAdapter(child: _buildEmptyState())];
@@ -509,8 +512,10 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                               ],
                             ),
                             const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            Wrap(
+                              spacing: 16,
+                              runSpacing: 8,
+                              alignment: WrapAlignment.center,
                               children: [
                                 _buildActionIcon(
                                   icon: Icons.phone_enabled,
@@ -677,21 +682,57 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                                 ],
                               ),
                             ),
-                            IconButton(
-                              icon: const Icon(
-                                Icons.person,
-                                color: Colors.blueAccent,
-                              ),
-                              onPressed: () {
-                                Navigator.pop(context);
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) =>
-                                        PatientProfileScreen(patient: p),
+                            Wrap(
+                              spacing: 0,
+                              runSpacing: 0,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.payments_outlined,
+                                    color: Colors.green,
                                   ),
-                                );
-                              },
+                                  onPressed: () {
+                                    try {
+                                      final recordWithDebt = p.records.firstWhere(
+                                        (r) => r.remainingAmount > 0,
+                                      );
+                                      showDialog(
+                                        context: context,
+                                        builder: (context) => DebtPaymentDialog(
+                                          patient: p,
+                                          record: recordWithDebt,
+                                        ),
+                                      );
+                                    } catch (e) {
+                                      // Fallback to profile if something is weird
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              PatientProfileScreen(patient: p),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.person_outline,
+                                    color: Colors.blueAccent,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(context);
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            PatientProfileScreen(patient: p),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
                             ),
                           ],
                         ),

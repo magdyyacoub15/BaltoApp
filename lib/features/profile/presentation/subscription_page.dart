@@ -26,15 +26,15 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
   int _daysRemaining = 0;
   bool _isLoading = true;
 
-  final String _vodafoneNumber = "01061438566";
-  final String _instapayNumber = "01112800404";
-  final String _whatsappNumber = "+201112800404";
+  String _vodafoneNumber = "01061438566";
+  String _instapayNumber = "01112800404";
+  String _whatsappNumber = "+201112800404";
 
   // Dynamic Prices
-  String _price1m = "75 ";
-  String _price3m = "199 ";
-  String _price6m = "349 ";
-  String _price1y = "599 ";
+  String _price1m = "75";
+  String _price3m = "199";
+  String _price6m = "349";
+  String _price1y = "599";
 
   @override
   void initState() {
@@ -92,10 +92,16 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
         final data = doc.data;
         if (mounted) {
           setState(() {
-            _price1m = data['price_1m'] ?? _price1m;
-            _price3m = data['price_3m'] ?? _price3m;
-            _price6m = data['price_6m'] ?? _price6m;
-            _price1y = data['price_1y'] ?? _price1y;
+            _price1m = data['price_1m']?.toString() ?? _price1m;
+            _price3m = data['price_3m']?.toString() ?? _price3m;
+            _price6m = data['price_6m']?.toString() ?? _price6m;
+            _price1y = data['price_1y']?.toString() ?? _price1y;
+            _vodafoneNumber =
+                data['vodafone_number']?.toString() ?? _vodafoneNumber;
+            _instapayNumber =
+                data['instapay_number']?.toString() ?? _instapayNumber;
+            _whatsappNumber =
+                data['whatsapp_number']?.toString() ?? _whatsappNumber;
           });
         }
       }
@@ -116,6 +122,12 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
     final TextEditingController p3m = TextEditingController(text: _price3m);
     final TextEditingController p6m = TextEditingController(text: _price6m);
     final TextEditingController p1y = TextEditingController(text: _price1y);
+    final TextEditingController vCash =
+        TextEditingController(text: _vodafoneNumber);
+    final TextEditingController iPay =
+        TextEditingController(text: _instapayNumber);
+    final TextEditingController wApp =
+        TextEditingController(text: _whatsappNumber);
     bool isSaving = false;
 
     showDialog(
@@ -131,6 +143,10 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
                 _buildPriceField(p3m, ref.tr('price_3_months')),
                 _buildPriceField(p6m, ref.tr('price_6_months')),
                 _buildPriceField(p1y, ref.tr('price_1_year')),
+                const Divider(),
+                _buildPriceField(vCash, ref.tr('vodafone_cash'), isPrice: false),
+                _buildPriceField(iPay, ref.tr('instapay'), isPrice: false),
+                _buildPriceField(wApp, ref.tr('whatsapp'), isPrice: false),
               ],
             ),
           ),
@@ -146,10 +162,13 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
                 onPressed: () async {
                   setDialogState(() => isSaving = true);
                   final data = {
-                    'price_1m': p1m.text,
-                    'price_3m': p3m.text,
-                    'price_6m': p6m.text,
-                    'price_1y': p1y.text,
+                    'price_1m': double.tryParse(p1m.text) ?? 0.0,
+                    'price_3m': double.tryParse(p3m.text) ?? 0.0,
+                    'price_6m': double.tryParse(p6m.text) ?? 0.0,
+                    'price_1y': double.tryParse(p1y.text) ?? 0.0,
+                    'vodafone_number': vCash.text,
+                    'instapay_number': iPay.text,
+                    'whatsapp_number': wApp.text,
                   };
 
                   try {
@@ -180,6 +199,9 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
                         _price3m = p3m.text;
                         _price6m = p6m.text;
                         _price1y = p1y.text;
+                        _vodafoneNumber = vCash.text;
+                        _instapayNumber = iPay.text;
+                        _whatsappNumber = wApp.text;
                       });
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -209,15 +231,22 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
     );
   }
 
-  Widget _buildPriceField(TextEditingController controller, String label) {
+  Widget _buildPriceField(TextEditingController controller, String label,
+      {bool isPrice = true}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: controller,
         textAlign: TextAlign.right,
+        keyboardType: isPrice
+            ? const TextInputType.numberWithOptions(decimal: true)
+            : TextInputType.phone,
+        inputFormatters: [
+          if (isPrice) FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+        ],
         decoration: InputDecoration(
           labelText: label,
-          hintText: ref.tr('enter_price'),
+          hintText: isPrice ? ref.tr('enter_price') : label,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         ),
       ),
@@ -226,8 +255,10 @@ class _SubscriptionPageState extends ConsumerState<SubscriptionPage>
 
   Future<void> _launchWhatsApp() async {
     final clinic = ref.read(clinicStreamProvider).value;
+    final user = ref.read(currentUserProvider).value;
+
     final clinicInfo = clinic != null
-        ? '${clinic.name} (${clinic.clinicCode})'
+        ? '${clinic.name} (${user?.email ?? ""})'
         : 'BaltoPro Clinic';
 
     final String msg = ref.tr('hello_subscribe_msg', [clinicInfo]);

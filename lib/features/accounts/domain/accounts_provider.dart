@@ -45,6 +45,7 @@ final transactionsStreamProvider =
 });
 
 // ─── ALL Transactions (Unfiltered for Accounts Screen) ───────────────────────
+// Cache-first: yields cached data instantly, then refreshes from network in background.
 final allTransactionsStreamProvider =
     StreamProvider<List<AppTransaction>>((ref) async* {
   final user = await ref.watch(currentUserProvider.future);
@@ -59,9 +60,17 @@ final allTransactionsStreamProvider =
   ref.watch(transactionsRefreshProvider);
   ref.watch(pollingTickProvider);
 
-  // Fetch all transactions for this clinic - NO threshold filtering
-  final data = await repo.fetchLiveTransactions(clinicId);
-  yield data;
+  // 1. Yield cached data immediately (no loading spinner)
+  final cached = await repo.getTransactions(clinicId);
+  if (cached.isNotEmpty) yield cached;
+
+  // 2. Fetch fresh from network in background and yield update
+  try {
+    final fresh = await repo.fetchLiveTransactions(clinicId);
+    yield fresh;
+  } catch (_) {
+    // If network fails, cached data already shown — silently skip
+  }
 });
 
 // ─── Daily Finance Stats ──────────────────────────────────────────────────────

@@ -20,6 +20,8 @@ class AccountsScreen extends ConsumerWidget {
     return Scaffold(
       body: AnimatedGradientBackground(
         child: transactionsAsync.when(
+          skipLoadingOnRefresh: true,
+          skipLoadingOnReload: true,
           data: (transactions) {
             if (transactions.isEmpty) {
               return Center(
@@ -203,6 +205,7 @@ class AccountsScreen extends ConsumerWidget {
     WidgetRef ref,
     AppTransaction t,
   ) {
+    final isAdmin = ref.read(currentUserProvider).value?.isAdmin == true;
     final isRev = t.type == TransactionType.revenue;
     return ListTile(
       leading: Container(
@@ -242,7 +245,7 @@ class AccountsScreen extends ConsumerWidget {
           ),
         ),
       ),
-      onLongPress: () => _confirmDelete(context, ref, t),
+      onLongPress: isAdmin ? () => _confirmDelete(context, ref, t) : null,
     );
   }
 
@@ -267,6 +270,7 @@ class AccountsScreen extends ConsumerWidget {
           }
 
           await ref.read(transactionRepositoryProvider).deleteTransaction(t.id, clinic.id);
+          ref.invalidate(allTransactionsStreamProvider);
         },
       ),
     );

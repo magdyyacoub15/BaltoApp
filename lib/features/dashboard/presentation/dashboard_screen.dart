@@ -28,7 +28,7 @@ class DashboardScreen extends ConsumerWidget {
     final todayAppointmentsCount = ref.watch(todayAppointmentsCountProvider);
     final waitingNowCount = ref.watch(waitingPatientsCountProvider);
     final quickAppointmentsAsync = ref.watch(enrichedAppointmentsProvider);
-    final removedIds = ref.watch(removedAppointmentIdsProvider);
+    // removedIds moved to _buildLiveQueue or passed as param
     final dailyFinance = ref.watch(dailyFinanceProvider);
 
     return Scaffold(
@@ -67,7 +67,12 @@ class DashboardScreen extends ConsumerWidget {
                   const SizedBox(height: 24),
                   _buildDateHeader(context, ref),
                   const SizedBox(height: 32),
-                  _buildLiveQueue(context, ref, quickAppointmentsAsync),
+                  _buildLiveQueue(
+                    context,
+                    ref,
+                    quickAppointmentsAsync,
+                    ref.watch(removedAppointmentIdsProvider),
+                  ),
                   const SizedBox(height: 80), // Padding for FAB
                 ]),
               ),
@@ -170,7 +175,7 @@ class DashboardScreen extends ConsumerWidget {
             [const Color(0xFF6441A5), const Color(0xFF2a0845)],
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
         Expanded(
           child: _buildGradientCard(
             context,
@@ -180,7 +185,7 @@ class DashboardScreen extends ConsumerWidget {
             [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
         Expanded(
           child: InkWell(
             onTap: () => _showIncomeDetailsDialog(context, ref),
@@ -194,7 +199,7 @@ class DashboardScreen extends ConsumerWidget {
             ),
           ),
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 8),
         Expanded(
           child: InkWell(
             onTap: () => _showExpenseDetailsDialog(context, ref),
@@ -270,6 +275,7 @@ class DashboardScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     AsyncValue<List<Appointment>> appointmentsAsync,
+    Set<String> removedIds,
   ) {
     return appointmentsAsync.when(
       skipLoadingOnRefresh: true,
@@ -300,44 +306,44 @@ class DashboardScreen extends ConsumerWidget {
             ),
           );
         }
-            final rawAppointments = appointments;
-            final appointmentsFiltered = rawAppointments.where((a) => !removedIds.contains(a.id)).toList();
 
-            if (appointmentsFiltered.isEmpty) {
-              return Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 40),
-                  child: Column(
-                    children: [
-                      Icon(Icons.event_busy, color: Colors.white24, size: 48),
-                      SizedBox(height: 12),
-                      Text(
-                        ref.tr('no_appointments_today'),
-                        style: TextStyle(color: Colors.white38),
-                      ),
-                    ],
-                  ),
-                ),
-              );
+        final appointmentsFiltered = appointments.where((a) => !removedIds.contains(a.id)).toList();
+
+        if (appointmentsFiltered.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Column(
+                children: [
+                   Icon(Icons.event_busy, color: Colors.white24, size: 48),
+                   SizedBox(height: 12),
+                   Text(
+                     ref.tr('no_appointments_today'),
+                     style: TextStyle(color: Colors.white38),
+                   ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return ReorderableListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: appointmentsFiltered.length,
+          onReorder: (int oldIndex, int newIndex) async {
+            final listForReorder = List<Appointment>.from(appointmentsFiltered);
+            if (oldIndex < newIndex) {
+              newIndex -= 1;
             }
+            final item = listForReorder.removeAt(oldIndex);
+            listForReorder.insert(newIndex, item);
 
-            return ReorderableListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: appointmentsFiltered.length,
-              onReorder: (int oldIndex, int newIndex) async {
-                final listForReorder = List<Appointment>.from(appointmentsFiltered);
-                if (oldIndex < newIndex) {
-                  newIndex -= 1;
-                }
-                final item = listForReorder.removeAt(oldIndex);
-                listForReorder.insert(newIndex, item);
-
-                // Update queueOrder for the reordered list
-                final updatedAppointments = <Appointment>[];
-                for (int i = 0; i < listForReorder.length; i++) {
-                  updatedAppointments.add(listForReorder[i].copyWith(queueOrder: i));
-                }
+            // Update queueOrder for the reordered list
+            final updatedAppointments = <Appointment>[];
+            for (int i = 0; i < listForReorder.length; i++) {
+              updatedAppointments.add(listForReorder[i].copyWith(queueOrder: i));
+            }
 
                 // Save new order to Firestore
                 await ref
@@ -561,13 +567,23 @@ class DashboardScreen extends ConsumerWidget {
                           // --- Financial & Record Cleanup Logic ---
                           if (appt.patient != null) {
                             final patient = appt.patient!;
-                            
-                            // 1. Precise Record Matching (by date/time within 1-minute window)
                             final apptDate = appt.date;
-                            final recordIndex = patient.records.indexWhere((r) {
-                              final diff = r.date.difference(apptDate).abs();
-                              return diff.inMinutes == 0; // Check if same minute
-                            });
+                            
+                            // 1. Match by: same day AND not finalized (more reliable than minute match)
+                            int recordIndex = patient.records.indexWhere((r) =>
+                              r.date.year == apptDate.year &&
+                              r.date.month == apptDate.month &&
+                              r.date.day == apptDate.day &&
+                              !r.isFinalized
+                            );
+
+                            // Fallback: match by minute if same-day search fails
+                            if (recordIndex == -1) {
+                              recordIndex = patient.records.indexWhere((r) {
+                                final diff = r.date.difference(apptDate).abs();
+                                return diff.inMinutes < 5;
+                              });
+                            }
                             
                             if (recordIndex != -1) {
                               final record = patient.records[recordIndex];
@@ -580,7 +596,7 @@ class DashboardScreen extends ConsumerWidget {
                                 );
                               }
                               
-                              // 3. Financial Adjustment (Reverse the amounts)
+                              // 3. Financial Adjustment (Reverse the amounts from patient totals)
                               final updatedPaid = (patient.paidAmount - record.paidAmount).clamp(0.0, double.infinity);
                               final updatedRemaining = (patient.remainingAmount - record.remainingAmount).clamp(0.0, double.infinity);
                               
@@ -595,6 +611,10 @@ class DashboardScreen extends ConsumerWidget {
                                   remainingAmount: updatedRemaining,
                                 ),
                               );
+                            } else {
+                              // No medical record found but still need to check for orphan transactions
+                              // Try to find a transaction for today to delete it
+                              debugPrint('⚠️ [Dashboard] No matching medical record found for appointment ${appt.id}');
                             }
                           }
 

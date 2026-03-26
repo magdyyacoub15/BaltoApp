@@ -1,11 +1,14 @@
 // ignore_for_file: deprecated_member_use
 import 'dart:math';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart' as models;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/services/appwrite_client.dart';
+import '../../../core/services/hive_cache_service.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/clinic_group.dart';
 import '../domain/models/clinic_membership.dart';
@@ -13,27 +16,73 @@ import '../domain/models/clinic_membership.dart';
 final authRepositoryProvider = Provider((ref) {
   final account = ref.watch(appwriteAccountProvider);
   final databases = ref.watch(appwriteTablesDBProvider);
-  return AuthRepository(account, databases);
+  final cache = ref.watch(hiveCacheServiceProvider);
+  final teams = ref.watch(appwriteTeamsProvider);
+  return AuthRepository(account, databases, cache, teams);
 });
 
 class AuthRepository {
   final Account _account;
   final TablesDB _databases;
+  final HiveCacheService _cache;
+  final Teams _teams;
   final _authStateController = StreamController<models.User?>.broadcast();
 
-  AuthRepository(this._account, this._databases) {
+  AuthRepository(this._account, this._databases, this._cache, this._teams) {
     _initAuthState();
   }
+
+  static const String _kCachedUserKey = 'cached_user_data';
 
   void _initAuthState() async {
     debugPrint('🔄 [Auth] _initAuthState() — checking current session');
     try {
       final user = await _account.get();
       debugPrint('✅ [Auth] Session found — userId=${user.$id}, email=${user.email}');
+      
+      // Cache this user for offline access
+      await _cacheUser(user);
+      
       if (!_authStateController.isClosed) _authStateController.add(user);
     } catch (e) {
-      debugPrint('ℹ️ [Auth] No active session: $e');
+      debugPrint('ℹ️ [Auth] Session check failed/missing: $e');
+      
+      // If it's a network error, try to load from cache
+      if (e.toString().contains('Network') || e.toString().contains('SocketException') || e.toString().contains('Failed host lookup')) {
+        final cachedUser = await _loadCachedUser();
+        if (cachedUser != null) {
+          debugPrint('🌐 [Auth] Offline mode: loading cached user — email=${cachedUser.email}');
+          if (!_authStateController.isClosed) _authStateController.add(cachedUser);
+          return;
+        }
+      }
+      
       if (!_authStateController.isClosed) _authStateController.add(null);
+    }
+  }
+
+  Future<void> _cacheUser(models.User user) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kCachedUserKey, json.encode(user.toMap()));
+    } catch (e) {
+      debugPrint('⚠️ [Auth] Error caching user: $e');
+    }
+  }
+
+  Future<models.User?> _loadCachedUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kCachedUserKey);
+      if (raw == null) return null;
+      final map = json.decode(raw) as Map<String, dynamic>;
+      
+      // Use the built-in fromMap factory if available (Appwrite 12+)
+      // Otherwise, the cached data is just for Auth state, we only need basic fields
+      return models.User.fromMap(map);
+    } catch (e) {
+      debugPrint('⚠️ [Auth] Error loading cached user: $e');
+      return null;
     }
   }
 
@@ -47,10 +96,35 @@ class AuthRepository {
         tableId: 'users',
         rowId: uid,
       );
-      return AppUser.fromMap(doc.data, doc.$id);
+      final user = AppUser.fromMap(doc.data, doc.$id);
+      
+      // Cache for offline
+      _cache.cacheValue('user_$uid', user.toMap());
+      
+      return user;
+    } on AppwriteException catch (e) {
+      // CRITICAL: If the document is NOT found (404), it means the user was removed/deleted.
+      // We must clear the cache and return null to trigger immediate logout/redirect.
+      if (e.code == 404) {
+        debugPrint('🚫 [Auth] getUserData — User document deleted (404). Clearing cache.');
+        _cache.removeCachedValue('user_$uid');
+        return null;
+      }
+      
+      debugPrint('ℹ️ [Auth] getUserData failed (AppwriteException ${e.code}): $e');
+      return _tryGetCachedUser(uid);
     } catch (e) {
-      return null;
+      debugPrint('ℹ️ [Auth] getUserData failed (General): $e');
+      return _tryGetCachedUser(uid);
     }
+  }
+
+  AppUser? _tryGetCachedUser(String uid) {
+    final cached = _cache.getCachedValue('user_$uid');
+    if (cached != null) {
+      return AppUser.fromMap(cached, uid);
+    }
+    return null;
   }
 
   // Get Clinic details
@@ -61,8 +135,18 @@ class AuthRepository {
         tableId: 'clinics',
         rowId: clinicId,
       );
-      return ClinicGroup.fromMap(doc.data, doc.$id);
+      final clinic = ClinicGroup.fromMap(doc.data, doc.$id);
+      
+      // Cache for offline
+      _cache.cacheValue('clinic_$clinicId', clinic.toMap());
+      
+      return clinic;
     } catch (e) {
+      debugPrint('ℹ️ [Auth] getClinicData failed, checking cache: $e');
+      final cached = _cache.getCachedValue('clinic_$clinicId');
+      if (cached != null) {
+        return ClinicGroup.fromMap(cached, clinicId);
+      }
       return null;
     }
   }
@@ -106,6 +190,8 @@ class AuthRepository {
 
   Future<void> logOut() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kCachedUserKey);
       await _account.deleteSession(sessionId: 'current');
     } catch (_) {}
     if (!_authStateController.isClosed) _authStateController.add(null);
@@ -153,23 +239,29 @@ class AuthRepository {
     final trialEndDate = DateTime.now().add(const Duration(days: 60));
     late final String clinicDocId;
     try {
-      final clinicDoc = await _databases.createRow(
+      // 3a. Create Appwrite Team for this clinic
+      final clinicIdForTeam = ID.unique();
+      final team = await _teams.create(teamId: clinicIdForTeam, name: clinicName);
+      clinicDocId = team.$id;
+      debugPrint('👥 [Auth] signUpAsAdmin — Appwrite Team created: $clinicDocId');
+
+      await _databases.createRow(
         databaseId: appwriteDatabaseId,
         tableId: 'clinics',
-        rowId: ID.unique(),
+        rowId: clinicDocId,
         data: {
           'name': clinicName,
           'clinicCode': clinicCode,
           'adminId': uid,
+          'adminEmail': email,
           'createdAt': DateTime.now().toIso8601String(),
           'subscriptionEndDate': trialEndDate.toIso8601String(),
           'isTrial': true,
         },
       );
-      clinicDocId = clinicDoc.$id;
-      debugPrint('✅ [Auth] signUpAsAdmin — clinic created: clinicId=$clinicDocId');
+      debugPrint('✅ [Auth] signUpAsAdmin — clinic document created: clinicId=$clinicDocId');
     } catch (e) {
-      debugPrint('❌ [Auth] signUpAsAdmin — create clinic failed: $e');
+      debugPrint('❌ [Auth] signUpAsAdmin — create clinic/team failed: $e');
       rethrow;
     }
 
@@ -306,6 +398,23 @@ class AuthRepository {
   // --- Admin Approval Actions ---
 
   Future<void> approveUser(String uid) async {
+    // 1. Get user data to know clinicId
+    final user = await getUserData(uid);
+    if (user != null) {
+      // 2. Add user to Appwrite Team
+      try {
+        await _teams.createMembership(
+          teamId: user.clinicId,
+          roles: [user.role], // Use 'admin' or 'secretary' as Appwrite role
+          email: user.email,
+          url: 'https://balto.pro', // Fallback URL
+        );
+        debugPrint('👥 [Auth] approveUser — Added user $uid to Team ${user.clinicId}');
+      } catch (e) {
+        debugPrint('⚠️ [Auth] approveUser — Team membership failed (already member?): $e');
+      }
+    }
+
     await _databases.updateRow(
       databaseId: appwriteDatabaseId,
       tableId: 'users',
@@ -315,11 +424,28 @@ class AuthRepository {
   }
 
   Future<void> rejectUser(String uid) async {
-    await _databases.deleteRow(
-      databaseId: appwriteDatabaseId,
-      tableId: 'users',
-      rowId: uid,
-    );
+    // 1. Get user data to know clinicId for team removal
+    final user = await getUserData(uid);
+    
+    // 2. Delete user document
+    try {
+      await _databases.deleteRow(
+        databaseId: appwriteDatabaseId,
+        tableId: 'users',
+        rowId: uid,
+      );
+    } catch (e) {
+      debugPrint('Error deleting user doc: $e');
+    }
+
+    // 3. Note: Removal from team requires membershipId in Appwrite Client SDK.
+    if (user != null) {
+      debugPrint('👥 [Auth] rejectUser — Note: Removal from team necessitates manual cleanup or server-side function if membershipId is not cached.');
+    }
+  }
+
+  Future<void> removeUserFromClinic(String uid, String clinicId) async {
+    await rejectUser(uid);
   }
 
   // --- Clinic Management ---
@@ -507,6 +633,7 @@ class AuthRepository {
 
   Future<void> createClinicForExistingUser({
     required String userId,
+    required String adminEmail,
     required String clinicName,
   }) async {
     // 1. Generate unique Clinic Code
@@ -522,6 +649,7 @@ class AuthRepository {
         'name': clinicName,
         'clinicCode': clinicCode,
         'adminId': userId,
+        'adminEmail': adminEmail,
         'createdAt': DateTime.now().toIso8601String(),
         'subscriptionEndDate': trialEndDate.toIso8601String(),
         'isTrial': true,

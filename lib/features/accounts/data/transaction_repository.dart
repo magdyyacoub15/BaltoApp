@@ -159,6 +159,11 @@ class TransactionRepository {
           tableId: 'transactions',
           rowId: docId,
           data: data,
+          permissions: [
+            Permission.read(Role.team(transaction.clinicId)),
+            Permission.update(Role.team(transaction.clinicId)),
+            Permission.delete(Role.team(transaction.clinicId, 'admin')),
+          ],
         );
         _refreshInBackground(transaction.clinicId);
         return docId;
@@ -222,6 +227,15 @@ class TransactionRepository {
   }
 
   Future<void> deleteTransaction(String id, String clinicId) async {
+    // 1. Optimistic UI update: remove from local cache immediately
+    final cached = _cache.getCachedTransactions(clinicId) ?? [];
+    if (cached.isNotEmpty) {
+      _cache.cacheTransactions(
+        clinicId,
+        cached.where((m) => m['id'] != id).toList(),
+      );
+    }
+
     final isOnline = await checkIsOnline();
 
     if (isOnline) {
@@ -238,12 +252,7 @@ class TransactionRepository {
       }
     }
 
-    // Offline: remove from cache + enqueue
-    final cached = _cache.getCachedTransactions(clinicId) ?? [];
-    _cache.cacheTransactions(
-      clinicId,
-      cached.where((m) => m['id'] != id).toList(),
-    );
+    // Offline: enqueue
     _queue.enqueue(
       table: 'transactions',
       operation: 'delete',

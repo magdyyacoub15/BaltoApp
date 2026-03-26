@@ -31,9 +31,17 @@ final patientsStreamProvider = StreamProvider<List<Patient>>((ref) async* {
   ref.watch(patientsRefreshProvider);
   ref.watch(pollingTickProvider);
 
-  // Fetch directly from network — no cache, no checkIsOnline
-  final data = await repo.fetchLivePatients(clinicId);
-  yield data;
+  // 1. Yield cached data immediately (no loading spinner)
+  final cached = await repo.getPatients(clinicId);
+  if (cached.isNotEmpty) yield cached;
+
+  // 2. Fetch fresh from network in background and yield update
+  try {
+    final fresh = await repo.fetchLivePatients(clinicId);
+    yield fresh;
+  } catch (_) {
+    // Silently ignore network errors if cache is already shown
+  }
 });
 
 // Search query notifier

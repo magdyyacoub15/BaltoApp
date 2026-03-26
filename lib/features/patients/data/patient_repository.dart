@@ -140,6 +140,11 @@ class PatientRepository {
           tableId: 'patients',
           rowId: docId,
           data: data,
+          permissions: [
+            Permission.read(Role.team(patient.clinicId)),
+            Permission.update(Role.team(patient.clinicId)),
+            Permission.delete(Role.team(patient.clinicId, 'admin')),
+          ],
         );
         await _fetchAndCachePatients(patient.clinicId);
         return docId;
@@ -196,18 +201,13 @@ class PatientRepository {
   }
 
   Future<void> deletePatient(Patient patient) async {
-    // Always delete cloud files if accessible
-    for (var record in patient.records) {
-      for (var url in record.attachmentUrls) {
-        await _cleanupService.deleteCloudFile(url);
-      }
-    }
-    if (patient.prescriptionImageUrl != null) {
-      await _cleanupService.deleteCloudFile(patient.prescriptionImageUrl);
-    }
+    // 1. Optimistic UI: remove from local cache IMMEDIATELY
+    _removePatientFromCache(patient.id, patient.clinicId);
+
+    // 2. Perform background cleanup (not critical for UI response)
+    _startBackgroundCleanup(patient);
 
     final isOnline = await checkIsOnline();
-
     if (isOnline) {
       try {
         await _databases.deleteRow(
@@ -222,7 +222,7 @@ class PatientRepository {
       }
     }
 
-    _removePatientFromCache(patient.id, patient.clinicId);
+    // 3. Offline backup: enqueue for later sync
     _queue.enqueue(
       table: 'patients',
       operation: 'delete',
@@ -231,6 +231,43 @@ class PatientRepository {
       clinicId: patient.clinicId,
     );
     debugPrint('📥 [PatientRepo] deletePatient queued offline: ${patient.id}');
+  }
+
+  void _startBackgroundCleanup(Patient patient) {
+    if (patient.prescriptionImageUrl != null) {
+      _cleanupService.deleteCloudFile(patient.prescriptionImageUrl!).catchError((_) {});
+    }
+    for (var record in patient.records) {
+      for (var url in record.attachmentUrls) {
+        _cleanupService.deleteCloudFile(url).catchError((_) {});
+      }
+    }
+  }
+
+  // ─── Debt Payment ─────────────────────────────────────────────────────────
+  Future<void> payMedicalRecordDebt({
+    required Patient patient,
+    required String recordId,
+    required double amountPaid,
+  }) async {
+    final updatedRecords = patient.records.map((r) {
+      if (r.id == recordId) {
+        return r.copyWith(
+          paidAmount: r.paidAmount + amountPaid,
+          remainingAmount: (r.remainingAmount - amountPaid).clamp(0.0, double.infinity),
+        );
+      }
+      return r;
+    }).toList();
+
+    final updatedPatient = patient.copyWith(
+      records: updatedRecords,
+      paidAmount: patient.paidAmount + amountPaid,
+      remainingAmount: (patient.remainingAmount - amountPaid).clamp(0.0, double.infinity),
+    );
+
+    await updatePatient(updatedPatient);
+    debugPrint('💰 [PatientRepo] payMedicalRecordDebt updated: ${patient.id} record: $recordId amount: $amountPaid');
   }
 
   // ─── Medical Records (delegate to updatePatient) ──────────────────────────

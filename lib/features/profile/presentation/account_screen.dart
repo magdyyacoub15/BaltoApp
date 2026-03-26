@@ -58,123 +58,91 @@ class AccountScreen extends ConsumerWidget {
                     SliverToBoxAdapter(
                       child: Column(
                         children: [
-                          Stack(
-                            children: [
-                              // User Info Section (Centered)
-                              SizedBox(
-                                width: double.infinity,
-                                child: Column(
-                                  children: [
-                                    const SizedBox(height: 20),
-                                    const CircleAvatar(
-                                      radius: 50,
-                                      backgroundColor: Colors.white24,
-                                      child: Icon(
-                                        Icons.person,
-                                        size: 60,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 20),
-                                    Text(
-                                      user.name,
-                                      style: const TextStyle(
-                                        fontSize: 22,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 12.0),
-                                      child: Text(
-                                        user.email,
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                    ),
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 4.0),
-                                      child: Text(
-                                        '${user.phone} • ${user.isAdmin ? ref.tr('admin') : ref.tr('secretary')}',
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white54,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Action Icons (Positioned at far right)
-                              Positioned(
-                                right: 16,
-                                top: 0,
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Action Icons (Left side or Wrap)
+                                Wrap(
+                                  direction: Axis.vertical,
+                                  spacing: 0,
                                   children: [
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      icon: const Icon(
-                                        Icons.language,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      onPressed: () =>
-                                          _showLanguageDialog(context, ref),
+                                      icon: const Icon(Icons.language, color: Colors.white, size: 20),
+                                      onPressed: () => _showLanguageDialog(context, ref),
                                       tooltip: ref.tr('change_language'),
                                     ),
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      icon: const Icon(
-                                        Icons.format_size,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      onPressed: () =>
-                                          _showScaleDialog(context, ref),
+                                      icon: const Icon(Icons.format_size, color: Colors.white, size: 20),
+                                      onPressed: () => _showScaleDialog(context, ref),
                                       tooltip: ref.tr('change_scale'),
                                     ),
-                                    // My Groups Button
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      icon: const Icon(
-                                        Icons.corporate_fare,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
+                                      icon: const Icon(Icons.corporate_fare, color: Colors.white, size: 20),
                                       onPressed: () {
-                                        final user = ref
-                                            .read(currentUserProvider)
-                                            .value;
+                                        final user = ref.read(currentUserProvider).value;
                                         if (user != null) {
-                                          _showClinicsDialog(
-                                            context,
-                                            ref,
-                                            user.id,
-                                            user.clinicId,
-                                          );
+                                          _showClinicsDialog(context, ref, user.id, user.clinicId);
                                         }
                                       },
                                       tooltip: ref.tr('my_groups'),
                                     ),
                                     IconButton(
                                       visualDensity: VisualDensity.compact,
-                                      icon: const Icon(
-                                        Icons.info_outline,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      onPressed: () =>
-                                          _showInfoDialog(context, ref),
+                                      icon: const Icon(Icons.info_outline, color: Colors.white, size: 20),
+                                      onPressed: () => _showInfoDialog(context, ref),
                                       tooltip: ref.tr('about_app'),
                                     ),
                                   ],
                                 ),
-                              ),
-                            ],
+                                // User Info Section (Expanded to take middle space)
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      const CircleAvatar(
+                                        radius: 50,
+                                        backgroundColor: Colors.white24,
+                                        child: Icon(Icons.person, size: 60, color: Colors.white),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          user.name,
+                                          style: const TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          user.email,
+                                          style: const TextStyle(fontSize: 14, color: Colors.white70),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          '${user.phone} • ${user.isAdmin ? ref.tr('admin') : ref.tr('secretary')}',
+                                          style: const TextStyle(fontSize: 12, color: Colors.white54),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                // Placeholder for symmetry or more actions
+                                const SizedBox(width: 40),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 30),
 
@@ -217,10 +185,10 @@ class AccountScreen extends ConsumerWidget {
                                 color: Colors.redAccent,
                                 size: 28,
                               ),
-                              label: Text(
-                                ref.tr('tutorial_video_btn'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              label: Flexible(
+                                child: Text(
+                                  ref.tr('tutorial_video_btn'),
+                                ),
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.white,
@@ -251,10 +219,10 @@ class AccountScreen extends ConsumerWidget {
                                 );
                               },
                               icon: const Icon(Icons.star, color: Colors.blue),
-                              label: Text(
-                                ref.tr('subscription_details'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                              label: Flexible(
+                                child: Text(
+                                  ref.tr('subscription_details'),
+                                ),
                               ),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.white,
@@ -289,10 +257,10 @@ class AccountScreen extends ConsumerWidget {
                                   Icons.admin_panel_settings,
                                   color: Colors.lightBlue,
                                 ),
-                                label: Text(
-                                  ref.tr('manage_clinic'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                label: Flexible(
+                                  child: Text(
+                                    ref.tr('manage_clinic'),
+                                  ),
                                 ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
@@ -330,10 +298,10 @@ class AccountScreen extends ConsumerWidget {
                                   Icons.settings_suggest,
                                   color: Colors.orangeAccent,
                                 ),
-                                label: Text(
-                                  ref.tr('clinic_settings'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                label: Flexible(
+                                  child: Text(
+                                    ref.tr('clinic_settings'),
+                                  ),
                                 ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
@@ -368,10 +336,10 @@ class AccountScreen extends ConsumerWidget {
                                   Icons.admin_panel_settings,
                                   color: Colors.red,
                                 ),
-                                label: Text(
-                                  ref.tr('super_admin_panel'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                label: Flexible(
+                                  child: Text(
+                                    ref.tr('super_admin_panel'),
+                                  ),
                                 ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.white,
@@ -577,9 +545,12 @@ class AccountScreen extends ConsumerWidget {
             child: Icon(icon, color: color, size: 28),
           ),
           const SizedBox(height: 8),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white, fontSize: 13),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
           ),
         ],
       ),

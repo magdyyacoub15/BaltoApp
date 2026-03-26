@@ -106,6 +106,8 @@ class AppointmentsListScreen extends ConsumerWidget {
         ],
       ),
       body: appointmentsAsync.when(
+        skipLoadingOnRefresh: true,
+        skipLoadingOnReload: true,
         data: (appointments) => appointments.isEmpty
             ? Center(
                 child: Text(

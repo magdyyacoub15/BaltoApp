@@ -34,8 +34,17 @@ final appointmentsStreamProvider =
   ref.watch(appointmentsRefreshProvider);
   ref.watch(pollingTickProvider);
 
-  final data = await repo.fetchLiveAppointments(clinicId);
-  yield _filterAndSort(data, threshold);
+  // 1. Yield cached data immediately
+  final cached = await repo.getAppointments(clinicId);
+  if (cached.isNotEmpty) yield _filterAndSort(cached, threshold);
+
+  // 2. Fetch fresh from network in background
+  try {
+    final fresh = await repo.fetchLiveAppointments(clinicId);
+    yield _filterAndSort(fresh, threshold);
+  } catch (_) {
+    // Silently ignore network errors if cache is already shown
+  }
 });
 
 List<Appointment> _filterAndSort(
