@@ -46,6 +46,7 @@ class MedicalRecord {
   final String? parentRecordId;
   final String? transactionId;
   final bool isFinalized;
+  final DateTime? nextReExamDate;
 
   MedicalRecord({
     required this.id,
@@ -60,6 +61,7 @@ class MedicalRecord {
     this.parentRecordId,
     this.transactionId,
     this.isFinalized = false,
+    this.nextReExamDate,
   });
 
   factory MedicalRecord.fromMap(Map<String, dynamic> map) {
@@ -84,6 +86,9 @@ class MedicalRecord {
       parentRecordId: map['parentRecordId'],
       transactionId: map['transactionId'],
       isFinalized: map['isFinalized'] ?? false,
+      nextReExamDate: map['nextReExamDate'] != null
+          ? DateTime.tryParse(map['nextReExamDate'].toString())
+          : null,
     );
   }
 
@@ -101,6 +106,7 @@ class MedicalRecord {
       'parentRecordId': parentRecordId,
       'transactionId': transactionId,
       'isFinalized': isFinalized,
+      'nextReExamDate': nextReExamDate?.toIso8601String(),
     };
   }
 
@@ -117,6 +123,7 @@ class MedicalRecord {
     String? parentRecordId,
     String? transactionId,
     bool? isFinalized,
+    Object? nextReExamDate = _sentinel,
   }) {
     return MedicalRecord(
       id: id ?? this.id,
@@ -131,6 +138,11 @@ class MedicalRecord {
       parentRecordId: parentRecordId ?? this.parentRecordId,
       transactionId: transactionId ?? this.transactionId,
       isFinalized: isFinalized ?? this.isFinalized,
+      nextReExamDate: nextReExamDate == _sentinel
+          ? this.nextReExamDate
+          : nextReExamDate as DateTime?,
     );
   }
 }
+
+const Object _sentinel = Object();

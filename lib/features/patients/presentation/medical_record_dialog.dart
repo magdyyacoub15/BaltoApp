@@ -5,6 +5,7 @@ import '../../../core/services/cleanup_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import '../domain/patient.dart';
 import '../domain/clinic_medications_provider.dart';
 import '../domain/models/medical_record.dart';
@@ -19,6 +20,9 @@ import '../domain/models/prescription.dart';
 import '../data/prescription_service.dart';
 import '../../../core/services/imgbb_service.dart';
 import 'prescription_preview_screen.dart';
+import '../../appointments/data/appointment_repository.dart';
+import '../../appointments/domain/appointment.dart';
+import '../../appointments/domain/appointments_provider.dart';
 
 class MedicalRecordDialog extends ConsumerStatefulWidget {
   final Patient patient;
@@ -57,6 +61,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
   late List<Medication> _medications;
 
   bool _isLoading = false;
+  DateTime? _nextReExamDate;
 
   @override
   void initState() {
@@ -100,6 +105,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
 
     _existingUrls = List.from(rec.attachmentUrls);
     _medications = List.from(rec.medications);
+    _nextReExamDate = rec.nextReExamDate;
 
     _medNameController = TextEditingController();
     _medNameFocusNode = FocusNode();
@@ -258,7 +264,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
         paidAmount: paid,
         remainingAmount: remaining,
         attachmentUrls: finalUrls,
-        isFinalized: true, // Mark as finalized upon saving
+        isFinalized: true,
         vitalSigns: VitalSigns(
           bloodPressure: _bpController.text.trim(),
           weight: double.tryParse(_weightController.text) ?? 0.0,
@@ -266,6 +272,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
           sugarLevel: double.tryParse(_sugarController.text) ?? 0.0,
         ),
         medications: _medications,
+        nextReExamDate: _nextReExamDate,
       );
 
       final updatedRecords = widget.patient.records.map((r) {
@@ -283,6 +290,23 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
 
       await repo.updatePatient(updatedPatient);
 
+      // Create future appointment if next re-exam date was selected
+      if (_nextReExamDate != null) {
+        final apptRepo = ref.read(appointmentRepositoryProvider);
+        await apptRepo.addAppointment(
+          Appointment(
+            id: '',
+            patientId: widget.patient.id,
+            date: _nextReExamDate!,
+            type: 're_examination',
+            clinicId: user.clinicId,
+            isWaiting: false,
+            isManual: false,
+          ),
+        );
+        ref.read(appointmentsRefreshProvider.notifier).refresh();
+      }
+
       if (paid != widget.record.paidAmount) {
         final transactionRepo = ref.read(transactionRepositoryProvider);
         final diff = paid - widget.record.paidAmount;
@@ -290,7 +314,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
           id: '',
           amount: diff,
           description:
-              '${ref.tr('edit_payment_for')}: ${widget.patient.name}', // I should add this key or use a generic one
+              '${ref.tr('edit_payment_for')}: ${widget.patient.name}',
           type: TransactionType.revenue,
           date: DateTime.now(),
           clinicId: user.clinicId,
@@ -311,13 +335,13 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
-              title: const Text(
-                'طباعة الروشتة',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              title: Text(
+                ref.tr('print_prescription_dialog_title'),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
               ),
-              content: const Text(
-                'تم تحديث الزيارة بنجاح. هل تريد طباعة الروشتة الآن؟',
-                style: TextStyle(fontSize: 14),
+              content: Text(
+                ref.tr('print_prescription_dialog_content'),
+                style: const TextStyle(fontSize: 14),
               ),
               actions: [
                 TextButton(
@@ -514,7 +538,9 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
                             if (_existingUrls.isNotEmpty ||
                                 _visitImages.isNotEmpty)
                               _buildImagesList(),
-                            const SizedBox(height: 40),
+                            const SizedBox(height: 24),
+                            _buildNextReExamDatePicker(),
+                            const SizedBox(height: 24),
                             _buildSaveButton(),
                             const SizedBox(height: 16),
                           ],
@@ -751,7 +777,91 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
     );
   }
 
+  Widget _buildNextReExamDatePicker() {
+    final lang = ref.read(languageProvider).languageCode;
+    final dateLabel = _nextReExamDate != null
+        ? DateFormat('yyyy/MM/dd', lang).format(_nextReExamDate!)
+        : ref.tr('not_set');
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _nextReExamDate != null
+              ? Colors.tealAccent.withAlpha(150)
+              : Colors.white.withAlpha(50),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.event_repeat_outlined,
+            color: _nextReExamDate != null ? Colors.tealAccent : Colors.white70,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ref.tr('next_reexam_date'),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  dateLabel,
+                  style: TextStyle(
+                    color: _nextReExamDate != null
+                        ? Colors.tealAccent
+                        : Colors.white54,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_nextReExamDate != null)
+            IconButton(
+              icon: const Icon(Icons.clear, color: Colors.white54, size: 18),
+              onPressed: () => setState(() => _nextReExamDate = null),
+              tooltip: ref.tr('clear'),
+            ),
+          TextButton(
+            onPressed: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _nextReExamDate ??
+                    DateTime.now().add(const Duration(days: 7)),
+                firstDate: DateTime.now(),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+                locale: Locale(ref.read(languageProvider).languageCode),
+              );
+              if (picked != null) {
+                setState(() => _nextReExamDate = picked);
+              }
+            },
+            child: Text(
+              _nextReExamDate != null
+                  ? ref.tr('change_date')
+                  : ref.tr('select_date'),
+              style: const TextStyle(color: Colors.tealAccent, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSaveButton() {
+
     return _isLoading
         ? const Center(child: CircularProgressIndicator())
         : ElevatedButton(

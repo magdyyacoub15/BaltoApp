@@ -1,4 +1,5 @@
 import 'package:appwrite/appwrite.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 const String appwriteEndpoint = 'https://fra.cloud.appwrite.io/v1';
@@ -10,7 +11,7 @@ final appwriteClientProvider = Provider<Client>((ref) {
   client
       .setEndpoint(appwriteEndpoint)
       .setProject(appwriteProjectId)
-      .setSelfSigned(status: true); // Allow self-signed certificates
+      .setSelfSigned(status: kDebugMode); // Only allow self-signed in debug mode
   return client;
 });
 

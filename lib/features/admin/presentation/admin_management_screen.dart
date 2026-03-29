@@ -287,12 +287,12 @@ class AdminManagementScreen extends ConsumerWidget {
                                         children: [
                                           _buildPermissionBadge(
                                             icon: Icons.account_balance_wallet_outlined,
-                                            label: 'الحسابات',
+                                            label: ref.tr('permissions_accounts'),
                                             isActive: employee.canViewAccounts,
                                           ),
                                           _buildPermissionBadge(
                                             icon: Icons.people_outline,
-                                            label: 'المرضى',
+                                            label: ref.tr('permissions_patients'),
                                             isActive: employee.canViewPatients,
                                           ),
                                         ],
@@ -352,8 +352,8 @@ class AdminManagementScreen extends ConsumerWidget {
                                   value: 'toggle_accounts',
                                   child: Text(
                                     employee.canViewAccounts
-                                        ? 'إخفاء صفحة الحسابات'
-                                        : 'إظهار صفحة الحسابات',
+                                        ? ref.tr('hide_accounts_page')
+                                        : ref.tr('show_accounts_page'),
                                     style: TextStyle(
                                       color: employee.canViewAccounts ? Colors.orange : Colors.green,
                                     ),
@@ -363,17 +363,17 @@ class AdminManagementScreen extends ConsumerWidget {
                                   value: 'toggle_patients',
                                   child: Text(
                                     employee.canViewPatients
-                                        ? 'إخفاء صفحة المرضى'
-                                        : 'إظهار صفحة المرضى',
+                                        ? ref.tr('hide_patients_page')
+                                        : ref.tr('show_patients_page'),
                                     style: TextStyle(
                                       color: employee.canViewPatients ? Colors.orange : Colors.green,
                                     ),
                                   ),
                                 ),
                                 const PopupMenuDivider(),
-                                const PopupMenuItem(
+                                PopupMenuItem(
                                   value: 'remove',
-                                  child: Text('حذف الموظف', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                  child: Text(ref.tr('remove_employee'), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                                 ),
                               ],
                             )
@@ -524,7 +524,7 @@ class AdminManagementScreen extends ConsumerWidget {
     await ref.read(authRepositoryProvider).approveUser(user.id);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تمت الموافقة على الموظف ${user.name} بنجاح')),
+        SnackBar(content: Text(ref.tr('approve_employee_success', [user.name]))),
       );
     }
   }
@@ -571,9 +571,9 @@ class AdminManagementScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (dialogContext) => DeleteConfirmationDialog(
-        title: 'حذف الموظف',
-        content: 'هل أنت متأكد من حذف الموظف "${user.name}" من نظام العيادة النهائي؟ هذا الإجراء لا يمكن التراجع عنه.',
-        deleteButtonText: 'حذف نهائياً',
+        title: ref.tr('remove_employee_title'),
+        content: ref.tr('remove_employee_confirm', [user.name]),
+        deleteButtonText: ref.tr('remove_employee_permanently'),
         onDelete: () async {
           final canWrite = await ref
               .read(permissionServiceProvider)
@@ -581,7 +581,7 @@ class AdminManagementScreen extends ConsumerWidget {
           if (!canWrite) {
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('الخدمة غير متاحة (تحقق من الاشتراك والإنترنت)')),
+                SnackBar(content: Text(ref.tr('remove_employee_subs_error'))),
               );
             }
             return;
@@ -591,13 +591,13 @@ class AdminManagementScreen extends ConsumerWidget {
             await ref.read(authRepositoryProvider).removeUserFromClinic(user.id, clinicId);
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                 SnackBar(content: Text('تم حذف الموظف ${user.name} بنجاح')),
+                 SnackBar(content: Text(ref.tr('remove_employee_success', [user.name]))),
               );
             }
           } catch (e) {
             if (context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                 SnackBar(content: Text('حدث خطأ أثناء الحذف: $e')),
+                 SnackBar(content: Text(ref.tr('remove_employee_error', [e.toString()]))),
               );
             }
           }

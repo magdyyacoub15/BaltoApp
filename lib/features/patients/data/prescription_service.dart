@@ -41,22 +41,20 @@ class PrescriptionService {
       pw.Page(
         pageFormat: PdfPageFormat.a5,
         margin: pw.EdgeInsets.zero,
-        theme: pw.ThemeData.withFont(
-          base: font,
-          bold: boldFont,
-          fontFallback: [fallback],
-        ),
-        build: (ctx) {
-          return pw.Directionality(
-            textDirection: dir,
-            child: pw.Stack(
+        pageTheme: pw.PageTheme(
+          pageFormat: PdfPageFormat.a5,
+          margin: pw.EdgeInsets.zero,
+          theme: pw.ThemeData.withFont(
+            base: font,
+            bold: boldFont,
+            fontFallback: [fallback],
+          ),
+          buildBackground: (ctx) {
+            return pw.Stack(
               children: [
-                // ── White background ─────────────────────────────────────────
                 pw.Positioned.fill(
                   child: pw.Container(color: PdfColors.white),
                 ),
-
-                // ── Diagonal 'Rx' watermark ──────────────────────────────────
                 pw.Center(
                   child: pw.Transform.rotate(
                     angle: -0.5,
@@ -71,11 +69,16 @@ class PrescriptionService {
                     ),
                   ),
                 ),
-
-                // ── Main Layout ──────────────────────────────────────────────
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                  children: [
+              ],
+            );
+          },
+        ),
+        build: (ctx) {
+          return pw.Directionality(
+            textDirection: dir,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
                     // ────────────────────────────────────────────────── HEADER
                     pw.Container(
                       padding: const pw.EdgeInsets.fromLTRB(24, 28, 24, 20),
@@ -378,8 +381,6 @@ class PrescriptionService {
                     ),
                   ],
                 ),
-              ],
-            ),
           );
         },
       ),

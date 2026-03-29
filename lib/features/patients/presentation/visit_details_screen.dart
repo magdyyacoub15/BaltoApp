@@ -16,6 +16,9 @@ import '../../../core/localization/language_provider.dart';
 import 'prescription_preview_screen.dart';
 import '../../../core/presentation/widgets/animated_gradient_background.dart';
 import '../../../core/services/imgbb_service.dart';
+import '../../appointments/data/appointment_repository.dart';
+import '../../appointments/domain/appointment.dart';
+import '../../appointments/domain/appointments_provider.dart';
 
 class VisitDetailsScreen extends ConsumerStatefulWidget {
   final Patient patient;
@@ -43,6 +46,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   final List<File> _visitImages = [];
   List<Medication> _medications = [];
   bool _isLoading = false;
+  DateTime? _nextReExamDate;
 
   @override
   void initState() {
@@ -69,6 +73,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     );
     _attachmentUrls = List.from(widget.record.attachmentUrls);
     _medications = List.from(widget.record.medications);
+    _nextReExamDate = widget.record.nextReExamDate;
   }
 
   @override
@@ -178,7 +183,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
         diagnosis: _diagnosisController.text.trim(),
         doctorNotes: _notesController.text.trim(),
         attachmentUrls: finalUrls,
-        isFinalized: true, // Mark as past visit upon saving
+        isFinalized: true,
         vitalSigns: VitalSigns(
           bloodPressure: _bpController.text.trim(),
           weight: double.tryParse(_weightController.text) ?? 0.0,
@@ -186,6 +191,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
           sugarLevel: double.tryParse(_sugarController.text) ?? 0.0,
         ),
         medications: _medications,
+        nextReExamDate: _nextReExamDate,
       );
 
       final updatedRecords = widget.patient.records.map((r) {
@@ -195,6 +201,26 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
       await repo.updatePatient(
         widget.patient.copyWith(records: updatedRecords),
       );
+
+      // Create future appointment if next re-exam date was selected
+      if (_nextReExamDate != null) {
+        final user = ref.read(currentUserProvider).value;
+        if (user != null) {
+          final apptRepo = ref.read(appointmentRepositoryProvider);
+          await apptRepo.addAppointment(
+            Appointment(
+              id: '',
+              patientId: widget.patient.id,
+              date: _nextReExamDate!,
+              type: 're_examination',
+              clinicId: user.clinicId,
+              isWaiting: false,
+              isManual: false,
+            ),
+          );
+          ref.read(appointmentsRefreshProvider.notifier).refresh();
+        }
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(
@@ -748,6 +774,8 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
               const SizedBox(height: 20),
               _buildPrescriptionSection(),
               const SizedBox(height: 20),
+              _buildNextReExamDatePicker(),
+              const SizedBox(height: 20),
               _buildAttachmentsSection(),
             ],
           ),
@@ -913,7 +941,91 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     );
   }
 
+  Widget _buildNextReExamDatePicker() {
+    final lang = ref.read(languageProvider).languageCode;
+    final dateLabel = _nextReExamDate != null
+        ? DateFormat('yyyy/MM/dd', lang).format(_nextReExamDate!)
+        : ref.tr('not_set');
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _nextReExamDate != null
+              ? Colors.tealAccent.withAlpha(150)
+              : Colors.white.withAlpha(50),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.event_repeat_outlined,
+            color: _nextReExamDate != null ? Colors.tealAccent : Colors.white70,
+            size: 22,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ref.tr('next_reexam_date'),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  dateLabel,
+                  style: TextStyle(
+                    color: _nextReExamDate != null
+                        ? Colors.tealAccent
+                        : Colors.white54,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (_nextReExamDate != null)
+            IconButton(
+              icon: const Icon(Icons.clear, color: Colors.white54, size: 18),
+              onPressed: () => setState(() => _nextReExamDate = null),
+              tooltip: ref.tr('clear'),
+            ),
+          TextButton(
+            onPressed: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _nextReExamDate ??
+                    DateTime.now().add(const Duration(days: 7)),
+                firstDate: DateTime.now(),
+                lastDate: DateTime.now().add(const Duration(days: 365)),
+                locale: Locale(ref.read(languageProvider).languageCode),
+              );
+              if (picked != null) {
+                setState(() => _nextReExamDate = picked);
+              }
+            },
+            child: Text(
+              _nextReExamDate != null
+                  ? ref.tr('change_date')
+                  : ref.tr('select_date'),
+              style: const TextStyle(color: Colors.tealAccent, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildVitalsGrid() {
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
