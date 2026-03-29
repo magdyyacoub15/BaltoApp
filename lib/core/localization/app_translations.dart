@@ -35,7 +35,7 @@ class AppTranslations {
       'english': 'English',
       'cancel': 'إلغاء',
       'close': 'إغلاق',
-      'clinic_settings': 'إعدادات بيانات العيادة (للالروشتة)',
+      'clinic_settings': 'إعدادات بيانات العيادة (الروشتة)',
       'clinic_address': 'عنوان العيادة',
       'clinic_phone': 'رقم هاتف العيادة',
       'prescription_doctor_name': 'اسم الطبيب (كما يظهر في الروشتة)',
@@ -327,7 +327,7 @@ class AppTranslations {
       'error_label': 'خطأ: {}',
 
       // Video & New Buttons
-      'tutorial_video_btn': 'فيديو شرح التطبيق (يجب المشاهدة)',
+      'tutorial_video_btn': 'فيديو شرح التطبيق ',
       'video_load_error': 'خطأ في تحميل الفيديو: {}',
       'retry': 'إعادة المحاولة',
       'web_video_fallback':
@@ -370,11 +370,13 @@ class AppTranslations {
       'fetch_code_error': 'خطأ في جلب الكود: {}',
       'remove_employee_title': 'حذف الموظف',
       'remove_employee': 'حذف الموظف',
-      'remove_employee_confirm': 'هل أنت متأكد من حذف الموظف "{}" من نظام العيادة النهائي؟ هذا الإجراء لا يمكن التراجع عنه.',
+      'remove_employee_confirm':
+          'هل أنت متأكد من حذف الموظف "{}" من نظام العيادة النهائي؟ هذا الإجراء لا يمكن التراجع عنه.',
       'remove_employee_permanently': 'حذف نهائياً',
       'remove_employee_success': 'تم حذف الموظف {} بنجاح',
       'remove_employee_error': 'حدث خطأ أثناء الحذف: {}',
-      'remove_employee_subs_error': 'الخدمة غير متاحة (تحقق من الاشتراك والإنترنت)',
+      'remove_employee_subs_error':
+          'الخدمة غير متاحة (تحقق من الاشتراك والإنترنت)',
       'approve_employee_success': 'تمت الموافقة على الموظف {} بنجاح',
       'hide_accounts_page': 'إخفاء صفحة الحسابات',
       'show_accounts_page': 'إظهار صفحة الحسابات',
@@ -566,14 +568,16 @@ class AppTranslations {
       'prescription_consultation': 'الاستشارة / المراجعة',
       'prescription_age': 'السن',
       'print_prescription_dialog_title': 'طباعة الروشتة',
-      'print_prescription_dialog_content': 'تم حفظ الزيارة بنجاح. هل تريد طباعة الروشتة الآن؟',
+      'print_prescription_dialog_content':
+          'تم حفظ الزيارة بنجاح. هل تريد طباعة الروشتة الآن؟',
       'yes': 'نعم',
       'no': 'لا',
       'age_label': 'العمر',
       'years_unit': 'سنة',
       'no_visits_yet': 'لا توجد زيارات مسجلة بعد',
       'delete_visit_title': 'حذف سجل الزيارة',
-      'delete_visit_desc': 'هل أنت متأكد من رغبتك في حذف هذا السجل؟ لا يمكن التراجع.',
+      'delete_visit_desc':
+          'هل أنت متأكد من رغبتك في حذف هذا السجل؟ لا يمكن التراجع.',
       'record_deleted_success': 'تم حذف السجل بنجاح',
       'record_delete_error': 'خطأ في حذف السجل',
       'medical_diagnosis': 'التشخيص الطبي',
@@ -598,10 +602,12 @@ class AppTranslations {
       'cleaning_up_storage': 'جاري تنظيف التخزين... ({}/{})',
       'clinic_code_hint': 'أدخل كود العيادة',
       'confirm_cancellation': 'تأكيد إلغاء الاشتراك',
-      'confirm_cancellation_message': 'هل أنت متأكد من رغبتك في إلغاء الاشتراك؟ سيتم تعطيل الإضافة فوراً.',
+      'confirm_cancellation_message':
+          'هل أنت متأكد من رغبتك في إلغاء الاشتراك؟ سيتم تعطيل الإضافة فوراً.',
       'delete_error': 'فشل الحذف: {}',
       'delete_everything': 'حذف كل شيء نهائياً',
-      'delete_system_warning': 'تحذير: سيتم حذف جميع بيانات عيادة "{}" نهائياً ولا يمكن التراجع.',
+      'delete_system_warning':
+          'تحذير: سيتم حذف جميع بيانات عيادة "{}" نهائياً ولا يمكن التراجع.',
       'error': 'خطأ',
       'examine_patient': 'كشف على مريض: {}',
       'extreme_caution': 'تحذير شديد!',
@@ -613,7 +619,8 @@ class AppTranslations {
       'print_preview': 'معاينة الطباعة',
       'return_to_login': 'العودة لتسجيل الدخول',
       'save_patient': 'حفظ المريض',
-      'signup_secretary_desc': 'أدخل كود العيادة واسمك وبريدك الإلكتروني للانضمام.',
+      'signup_secretary_desc':
+          'أدخل كود العيادة واسمك وبريدك الإلكتروني للانضمام.',
       'signup_secretary_title': 'تسجيل حساب كموظف',
       'update': 'تحديث',
       'update_error': 'خطأ في التحديث: {}',
@@ -984,11 +991,13 @@ class AppTranslations {
       'fetch_code_error': 'Error fetching code: {}',
       'remove_employee_title': 'Remove Employee',
       'remove_employee': 'Remove Employee',
-      'remove_employee_confirm': 'Are you sure you want to permanently remove "{}" from the clinic? This cannot be undone.',
+      'remove_employee_confirm':
+          'Are you sure you want to permanently remove "{}" from the clinic? This cannot be undone.',
       'remove_employee_permanently': 'Remove Permanently',
       'remove_employee_success': 'Employee {} removed successfully',
       'remove_employee_error': 'Error during removal: {}',
-      'remove_employee_subs_error': 'Service unavailable (check subscription and network)',
+      'remove_employee_subs_error':
+          'Service unavailable (check subscription and network)',
       'approve_employee_success': 'Employee {} approved successfully',
       'hide_accounts_page': 'Hide Accounts Page',
       'show_accounts_page': 'Show Accounts Page',
@@ -1184,14 +1193,16 @@ class AppTranslations {
       'prescription_consultation': 'Consultation / Follow-up',
       'prescription_age': 'Age',
       'print_prescription_dialog_title': 'Print Prescription',
-      'print_prescription_dialog_content': 'Visit saved successfully. Do you want to print the prescription now?',
+      'print_prescription_dialog_content':
+          'Visit saved successfully. Do you want to print the prescription now?',
       'yes': 'Yes',
       'no': 'No',
       'age_label': 'Age',
       'years_unit': 'years',
       'no_visits_yet': 'No visits recorded yet',
       'delete_visit_title': 'Delete Visit Record',
-      'delete_visit_desc': 'Are you sure you want to delete this record? This cannot be undone.',
+      'delete_visit_desc':
+          'Are you sure you want to delete this record? This cannot be undone.',
       'record_deleted_success': 'Record deleted successfully',
       'record_delete_error': 'Error deleting record',
       'medical_diagnosis': 'Medical Diagnosis',
@@ -1216,10 +1227,12 @@ class AppTranslations {
       'cleaning_up_storage': 'Cleaning up storage... ({}/{})',
       'clinic_code_hint': 'Enter clinic code',
       'confirm_cancellation': 'Confirm Cancellation',
-      'confirm_cancellation_message': 'Are you sure you want to cancel the subscription? Adding will be disabled immediately.',
+      'confirm_cancellation_message':
+          'Are you sure you want to cancel the subscription? Adding will be disabled immediately.',
       'delete_error': 'Delete failed: {}',
       'delete_everything': 'Delete Everything Permanently',
-      'delete_system_warning': 'Warning: All data for clinic "{}" will be permanently deleted and cannot be undone.',
+      'delete_system_warning':
+          'Warning: All data for clinic "{}" will be permanently deleted and cannot be undone.',
       'error': 'Error',
       'examine_patient': 'Examine patient: {}',
       'extreme_caution': 'Extreme Caution!',
@@ -1231,7 +1244,8 @@ class AppTranslations {
       'print_preview': 'Print Preview',
       'return_to_login': 'Back to Login',
       'save_patient': 'Save Patient',
-      'signup_secretary_desc': 'Enter the clinic code, your name and email to join.',
+      'signup_secretary_desc':
+          'Enter the clinic code, your name and email to join.',
       'signup_secretary_title': 'Register as Staff',
       'update': 'Update',
       'update_error': 'Update error: {}',
