@@ -17,18 +17,16 @@ final authRepositoryProvider = Provider((ref) {
   final account = ref.watch(appwriteAccountProvider);
   final databases = ref.watch(appwriteTablesDBProvider);
   final cache = ref.watch(hiveCacheServiceProvider);
-  final teams = ref.watch(appwriteTeamsProvider);
-  return AuthRepository(account, databases, cache, teams);
+  return AuthRepository(account, databases, cache);
 });
 
 class AuthRepository {
   final Account _account;
   final TablesDB _databases;
   final HiveCacheService _cache;
-  final Teams _teams;
   final _authStateController = StreamController<models.User?>.broadcast();
 
-  AuthRepository(this._account, this._databases, this._cache, this._teams) {
+  AuthRepository(this._account, this._databases, this._cache) {
     _initAuthState();
   }
 
@@ -153,12 +151,29 @@ class AuthRepository {
 
   // Manual Shift Reset
   Future<void> resetShift(String clinicId) async {
+    final newResetTime = DateTime.now().toUtc();
+    final newResetStr = newResetTime.toIso8601String();
+    debugPrint('▶ [Tracer] resetShift() — clinicId=$clinicId, newTime=$newResetStr');
+    
+    // 1. Update Appwrite
     await _databases.updateRow(
       databaseId: appwriteDatabaseId,
       tableId: 'clinics',
       rowId: clinicId,
-      data: {'lastShiftReset': DateTime.now().toIso8601String()},
+      data: {'lastShiftReset': newResetStr},
     );
+
+    // 2. Update Local Cache IMMEDIATELY so StreamProvider picks it up
+    final cacheKey = 'clinic_$clinicId';
+    final cached = _cache.getCachedValue(cacheKey);
+    if (cached != null) {
+      final updatedMap = Map<String, dynamic>.from(cached as Map);
+      updatedMap['lastShiftReset'] = newResetStr;
+      _cache.cacheValue(cacheKey, updatedMap);
+      debugPrint('✅ [Tracer] resetShift() — local cache updated');
+    }
+    
+    debugPrint('✅ [Tracer] resetShift() — update complete');
   }
 
   Future<void> login(String email, String password) async {
@@ -236,14 +251,12 @@ class AuthRepository {
     debugPrint('🔑 [Auth] signUpAsAdmin — generated clinicCode=$clinicCode');
 
     // 3. Create Clinic Document with 60-day Trial
-    final trialEndDate = DateTime.now().add(const Duration(days: 60));
+    final trialEndDate = DateTime.now().toUtc().add(const Duration(days: 60));
     late final String clinicDocId;
     try {
-      // 3a. Create Appwrite Team for this clinic
-      final clinicIdForTeam = ID.unique();
-      final team = await _teams.create(teamId: clinicIdForTeam, name: clinicName);
-      clinicDocId = team.$id;
-      debugPrint('👥 [Auth] signUpAsAdmin — Appwrite Team created: $clinicDocId');
+      // 3a. Generate a unique clinic ID (no Appwrite Team needed — app uses its own memberships table)
+      clinicDocId = ID.unique();
+      debugPrint('🔑 [Auth] signUpAsAdmin — generated clinicDocId=$clinicDocId');
 
       await _databases.createRow(
         databaseId: appwriteDatabaseId,
@@ -253,8 +266,7 @@ class AuthRepository {
           'name': clinicName,
           'clinicCode': clinicCode,
           'adminId': uid,
-          'adminEmail': email,
-          'createdAt': DateTime.now().toIso8601String(),
+          'createdAt': DateTime.now().toUtc().toIso8601String(),
           'subscriptionEndDate': trialEndDate.toIso8601String(),
           'isTrial': true,
         },
@@ -381,7 +393,7 @@ class AuthRepository {
           'clinicId': clinicId,
           'role': 'secretary',
           'status': 'pending',
-          'joinedAt': DateTime.now().toIso8601String(),
+          'joinedAt': DateTime.now().toUtc().toIso8601String(),
         },
       );
       debugPrint('✅ [Auth] signUpAsSecretary — pending membership created');
@@ -398,23 +410,6 @@ class AuthRepository {
   // --- Admin Approval Actions ---
 
   Future<void> approveUser(String uid) async {
-    // 1. Get user data to know clinicId
-    final user = await getUserData(uid);
-    if (user != null) {
-      // 2. Add user to Appwrite Team
-      try {
-        await _teams.createMembership(
-          teamId: user.clinicId,
-          roles: [user.role], // Use 'admin' or 'secretary' as Appwrite role
-          email: user.email,
-          url: 'https://balto.pro', // Fallback URL
-        );
-        debugPrint('👥 [Auth] approveUser — Added user $uid to Team ${user.clinicId}');
-      } catch (e) {
-        debugPrint('⚠️ [Auth] approveUser — Team membership failed (already member?): $e');
-      }
-    }
-
     await _databases.updateRow(
       databaseId: appwriteDatabaseId,
       tableId: 'users',
@@ -640,7 +635,7 @@ class AuthRepository {
     final clinicCode = generateRandomCode(6);
 
     // 2. Create Clinic Document with 60-day Trial
-    final trialEndDate = DateTime.now().add(const Duration(days: 60));
+    final trialEndDate = DateTime.now().toUtc().add(const Duration(days: 60));
     final clinicDoc = await _databases.createRow(
       databaseId: appwriteDatabaseId,
       tableId: 'clinics',
@@ -649,9 +644,8 @@ class AuthRepository {
         'name': clinicName,
         'clinicCode': clinicCode,
         'adminId': userId,
-        'adminEmail': adminEmail,
-        'createdAt': DateTime.now().toIso8601String(),
-        'subscriptionEndDate': trialEndDate.toIso8601String(),
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+        'subscriptionEndDate': trialEndDate.toUtc().toIso8601String(),
         'isTrial': true,
       },
     );
@@ -689,7 +683,7 @@ class AuthRepository {
           'clinicId': clinicId,
           'role': 'admin',
           'status': 'approved',
-          'joinedAt': DateTime.now().toIso8601String(),
+          'joinedAt': DateTime.now().toUtc().toIso8601String(),
         },
       );
     }

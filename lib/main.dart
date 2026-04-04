@@ -8,6 +8,7 @@ import 'core/providers/settings_provider.dart';
 import 'core/localization/language_provider.dart';
 import 'core/services/hive_cache_service.dart';
 import 'core/services/sync_service.dart';
+import 'core/services/polling_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,15 +30,30 @@ class ClinicApp extends ConsumerStatefulWidget {
   ConsumerState<ClinicApp> createState() => _ClinicAppState();
 }
 
-class _ClinicAppState extends ConsumerState<ClinicApp> {
+class _ClinicAppState extends ConsumerState<ClinicApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Start the background sync listener as soon as the widget tree is ready.
     // Uses addPostFrameCallback so that all providers are initialised first.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(syncServiceProvider).startListening();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Trigger a global cache-first refresh when the app returns to the foreground
+      ref.read(pageRefreshProvider.notifier).refresh();
+    }
   }
 
   @override

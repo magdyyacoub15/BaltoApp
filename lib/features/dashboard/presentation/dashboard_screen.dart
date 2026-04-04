@@ -19,6 +19,7 @@ import '../../../core/presentation/widgets/animated_gradient_background.dart';
 import '../../../core/presentation/widgets/delete_confirmation_dialog.dart';
 import '../../../core/services/permission_service.dart';
 import '../../../core/localization/language_provider.dart';
+import 'collect_debt_dialog.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -165,6 +166,7 @@ class DashboardScreen extends ConsumerWidget {
     Map<String, double> finance,
   ) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(
           child: _buildGradientCard(
@@ -173,9 +175,10 @@ class DashboardScreen extends ConsumerWidget {
             '$appointments',
             Icons.calendar_today_rounded,
             [const Color(0xFF6441A5), const Color(0xFF2a0845)],
+            height: 115,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         Expanded(
           child: _buildGradientCard(
             context,
@@ -183,33 +186,36 @@ class DashboardScreen extends ConsumerWidget {
             '$waiting',
             Icons.people_alt_rounded,
             [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
+            height: 115,
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         Expanded(
           child: InkWell(
             onTap: () => _showIncomeDetailsDialog(context, ref),
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             child: _buildGradientCard(
               context,
               ref.tr('net_income'),
               '${finance['net']?.toInt() ?? 0}',
               Icons.account_balance_wallet_rounded,
               [const Color(0xFF11998e), const Color(0xFF38ef7d)],
+              height: 95,
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         Expanded(
           child: InkWell(
             onTap: () => _showExpenseDetailsDialog(context, ref),
-            borderRadius: BorderRadius.circular(24),
+            borderRadius: BorderRadius.circular(20),
             child: _buildGradientCard(
               context,
               ref.tr('expenses'),
               '${finance['expense']?.toInt() ?? 0}',
               Icons.money_off_rounded,
               [const Color(0xFFE53935), const Color(0xFFE35D5B)],
+              height: 95,
             ),
           ),
         ),
@@ -222,16 +228,18 @@ class DashboardScreen extends ConsumerWidget {
     String title,
     String value,
     IconData icon,
-    List<Color> colors,
-  ) {
+    List<Color> colors, {
+    double? height,
+  }) {
     return Container(
+      height: height,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: colors,
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
@@ -349,10 +357,14 @@ class DashboardScreen extends ConsumerWidget {
                 await ref
                     .read(appointmentRepositoryProvider)
                     .updateQueueOrder(updatedAppointments);
+                
+                // Force immediate UI refresh to sync with updated cache
+                ref.read(appointmentsRefreshProvider.notifier).refresh();
               },
               itemBuilder: (context, index) {
                 final appt = appointmentsFiltered[index];
             final item = Container(
+              key: ValueKey(appt.id),
               margin: const EdgeInsets.only(bottom: 12),
               decoration: BoxDecoration(
                 color: appt.isCompleted
@@ -479,43 +491,61 @@ class DashboardScreen extends ConsumerWidget {
                         },
                       ),
                     const SizedBox(width: 4),
-                    appt.isWaiting && !appt.isCompleted
-                        ? SizedBox(
-                            height: 32,
-                            child: ElevatedButton(
-                              onPressed: () =>
-                                  _completeAppointment(context, ref, appt),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                                elevation: 0,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: Text(
-                                ref.tr('enter'),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                    if (appt.isWaiting && !appt.isCompleted)
+                      // Stage 1: Waiting → Enter Doctor Room
+                      SizedBox(
+                        height: 32,
+                        child: ElevatedButton(
+                          onPressed: () => _toggleWaitingState(context, ref, appt),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                          )
-                        : (appt.isCompleted
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                  size: 20,
-                                )
-                              : const Icon(
-                                  Icons.access_time,
-                                  color: Colors.orange,
-                                  size: 20,
-                                )),
+                          ),
+                          child: Text(
+                            ref.tr('enter'),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (!appt.isWaiting && !appt.isCompleted)
+                      // Stage 2: In Examination → Finish
+                      SizedBox(
+                        height: 32,
+                        child: ElevatedButton(
+                          onPressed: () => _completeAppointment(context, ref, appt),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: Text(
+                            ref.tr('finish'),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      // Stage 3: Completed
+                      const Icon(
+                        Icons.check_circle_rounded,
+                        color: Colors.green,
+                        size: 24,
+                      ),
                   ],
                 ),
               ),
@@ -594,6 +624,7 @@ class DashboardScreen extends ConsumerWidget {
                                   record.transactionId!,
                                   apptClinicId,
                                 );
+                                ref.read(transactionsRefreshProvider.notifier).refresh();
                               }
                               
                               // 3. Financial Adjustment (Reverse the amounts from patient totals)
@@ -683,6 +714,22 @@ class DashboardScreen extends ConsumerWidget {
     return Colors.white70;
   }
 
+  Future<void> _toggleWaitingState(
+    BuildContext context,
+    WidgetRef ref,
+    Appointment appt,
+  ) async {
+    final user = ref.read(currentUserProvider).value;
+    if (user == null) return;
+    
+    // Toggle waiting status (Waiting → In Examination)
+    await ref
+        .read(appointmentRepositoryProvider)
+        .updateAppointment(appt.copyWith(isWaiting: !appt.isWaiting));
+        
+    ref.read(appointmentsRefreshProvider.notifier).refresh();
+  }
+
   Future<void> _completeAppointment(
     BuildContext context,
     WidgetRef ref,
@@ -690,9 +737,14 @@ class DashboardScreen extends ConsumerWidget {
   ) async {
     final user = ref.read(currentUserProvider).value;
     if (user == null) return;
+    
+    // Mark as completed (will stay in list at the bottom until End Day)
     await ref
         .read(appointmentRepositoryProvider)
-        .updateAppointment(appt.copyWith(isWaiting: false, isCompleted: true));
+        .updateAppointment(appt.copyWith(isCompleted: true));
+
+    // Force refresh
+    ref.read(appointmentsRefreshProvider.notifier).refresh();
 
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -790,8 +842,7 @@ class DashboardScreen extends ConsumerWidget {
               final todayIncomes = transactions
                   .where(
                     (t) =>
-                        (t.date.isAfter(threshold) ||
-                            t.date.isAtSameMomentAs(threshold)) &&
+                        t.date.toUtc().isAfter(threshold) &&
                         t.type == TransactionType.revenue,
                   )
                   .toList();
@@ -902,8 +953,7 @@ class DashboardScreen extends ConsumerWidget {
               final todayExpenses = transactions
                   .where(
                     (t) =>
-                        (t.date.isAfter(threshold) ||
-                            t.date.isAtSameMomentAs(threshold)) &&
+                        t.date.toUtc().isAfter(threshold) &&
                         t.type == TransactionType.expense,
                   )
                   .toList();
@@ -1101,6 +1151,27 @@ class DashboardScreen extends ConsumerWidget {
                       }
 
                       _showAddExpenseDialog(context, ref);
+                    },
+                  ),
+                  ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.teal,
+                      child: Icon(
+                        Icons.monetization_on_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                    title: Text(
+                      ref.tr('collect_debt'),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(ref.tr('select_patient_debt')),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      showDialog(
+                        context: context,
+                        builder: (ctx) => const CollectDebtDialog(),
+                      );
                     },
                   ),
                 ],

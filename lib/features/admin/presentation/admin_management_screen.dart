@@ -680,6 +680,7 @@ class AdminManagementScreen extends ConsumerWidget {
       }
 
       await authRepo.updateClinicCode(clinicId, newCode);
+      ref.invalidate(clinicStreamProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,

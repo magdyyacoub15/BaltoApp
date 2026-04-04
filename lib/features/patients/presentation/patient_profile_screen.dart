@@ -290,6 +290,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
   }
 
   Future<void> _printPrescription(Patient patient, MedicalRecord record) async {
+    debugPrint('🖨️ [Tracer] Printing prescription for: ${patient.name}, date: ${record.date}');
     final clinic = ref.read(clinicStreamProvider).value;
     if (clinic == null) return;
 

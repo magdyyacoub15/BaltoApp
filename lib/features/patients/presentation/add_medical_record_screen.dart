@@ -193,6 +193,7 @@ class _AddMedicalRecordScreenState
   }
 
   Future<void> _printPrescription() async {
+    debugPrint('🖨️ [Tracer] Printing prescription for patient in add_record_screen, id: ${widget.patientId}');
     final clinic = ref.read(clinicStreamProvider).value;
     if (clinic == null) return;
 

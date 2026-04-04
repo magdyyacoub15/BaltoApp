@@ -63,7 +63,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
     // Find relevant record for this session
     MedicalRecord? todayRecord;
     if (widget.patient != null) {
-      final searchDate = widget.appointment?.date ?? DateTime.now();
+      final searchDate = widget.appointment?.date ?? DateTime.now().toUtc();
       try {
         todayRecord = widget.patient!.records.firstWhere((r) =>
             r.date.year == searchDate.year &&
@@ -75,12 +75,16 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
 
     _paidController = TextEditingController(
       text: todayRecord != null && todayRecord.paidAmount > 0
-          ? todayRecord.paidAmount.toString()
+          ? (todayRecord.paidAmount % 1 == 0
+              ? todayRecord.paidAmount.toInt().toString()
+              : todayRecord.paidAmount.toString())
           : '',
     );
     _remainingController = TextEditingController(
       text: todayRecord != null && todayRecord.remainingAmount > 0
-          ? todayRecord.remainingAmount.toString()
+          ? (todayRecord.remainingAmount % 1 == 0
+              ? todayRecord.remainingAmount.toInt().toString()
+              : todayRecord.remainingAmount.toString())
           : '',
     );
     _nameController.addListener(_onNameChanged);
@@ -203,6 +207,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
 
       if (widget.patient == null && _matchedPatient == null) {
         // --- NEW PATIENT ---
+        debugPrint('🆕 [Tracer] Starting creation of NEW patient: ${_nameController.text.trim()}');
         // 1. Create Transaction first to get ID
         currentTransactionId = await transactionRepo.addTransaction(
           AppTransaction(
@@ -210,7 +215,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             amount: totalPaid,
             description: ref.tr('examine_patient', [_nameController.text.trim()]),
             type: TransactionType.revenue,
-            date: DateTime.now(),
+            date: DateTime.now().toUtc(),
             clinicId: user.clinicId,
             appointmentId: newApptId.isNotEmpty ? newApptId : null,
           ),
@@ -225,11 +230,11 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
           paidAmount: totalPaid,
           remainingAmount: remaining,
           clinicId: user.clinicId,
-          lastVisit: DateTime.now(),
+          lastVisit: DateTime.now().toUtc(),
           records: [
             MedicalRecord(
               id: '',
-              date: DateTime.now(),
+              date: DateTime.now().toUtc(),
               diagnosis: '',
               doctorNotes: '',
               paidAmount: totalPaid,
@@ -239,12 +244,13 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
           ],
         );
         patientId = await repo.addPatient(newPatient);
+        debugPrint('✅ [Tracer] NEW patient created successfully: $patientId');
 
         await apptRepo.addAppointment(
           Appointment(
             id: '',
             patientId: patientId,
-            date: DateTime.now(),
+            date: DateTime.now().toUtc(),
             type: _examType,
             clinicId: user.clinicId,
             isWaiting: true,
@@ -254,6 +260,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
       } else {
         // --- EXISTING PATIENT ---
         final targetPatient = widget.patient ?? _matchedPatient!;
+        debugPrint('📝 [Tracer] Updating EXISTING patient: ${targetPatient.name} (ID: ${targetPatient.id})');
         patientId = targetPatient.id;
 
         final searchDate = widget.appointment?.date ?? DateTime.now();
@@ -279,7 +286,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               amount: totalPaid,
               description: ref.tr('examine_patient', [_nameController.text.trim()]),
               type: TransactionType.revenue,
-              date: activeRecord?.date ?? DateTime.now(),
+              date: activeRecord?.date ?? DateTime.now().toUtc(),
               clinicId: user.clinicId,
             ),
           );
@@ -291,7 +298,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               amount: totalPaid,
               description: ref.tr('examine_patient', [_nameController.text.trim()]),
               type: TransactionType.revenue,
-              date: activeRecord?.date ?? DateTime.now(),
+              date: activeRecord?.date ?? DateTime.now().toUtc(),
               clinicId: user.clinicId,
             ),
           );
@@ -303,7 +310,13 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
 
         if (!widget.editOnly) {
           // Check if patient already has a non-finalized record today (avoid duplicates)
-          final existingNonFinalizedIndex = targetPatient.records.indexWhere((r) => !r.isFinalized);
+          final today = DateTime.now().toUtc();
+          final existingNonFinalizedIndex = targetPatient.records.indexWhere((r) => 
+            !r.isFinalized && 
+            r.date.toUtc().year == today.year && 
+            r.date.toUtc().month == today.month && 
+            r.date.toUtc().day == today.day
+          );
 
           if (existingNonFinalizedIndex != -1) {
             // Update existing record (e.g., if re-adding from queue to change type)
@@ -331,7 +344,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
               Appointment(
                 id: '',
                 patientId: patientId,
-                date: DateTime.now(),
+                date: DateTime.now().toUtc(),
                 type: _examType,
                 clinicId: user.clinicId,
                 isWaiting: true,
@@ -346,7 +359,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             }
             final newRecord = MedicalRecord(
               id: const Uuid().v4(),
-              date: DateTime.now(),
+              date: DateTime.now().toUtc(),
               diagnosis: '',
               doctorNotes: '',
               paidAmount: totalPaid,

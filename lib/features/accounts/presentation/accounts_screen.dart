@@ -270,7 +270,7 @@ class AccountsScreen extends ConsumerWidget {
           }
 
           await ref.read(transactionRepositoryProvider).deleteTransaction(t.id, clinic.id);
-          ref.invalidate(allTransactionsStreamProvider);
+          ref.read(transactionsRefreshProvider.notifier).refresh();
         },
       ),
     );
@@ -352,6 +352,7 @@ class AccountsScreen extends ConsumerWidget {
                 );
 
                 await ref.read(transactionRepositoryProvider).addTransaction(transaction);
+                ref.read(transactionsRefreshProvider.notifier).refresh();
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(ref.tr('save_record')),

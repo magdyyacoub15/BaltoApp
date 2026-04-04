@@ -36,8 +36,8 @@ class Appointment {
       patientId: data['patientId'] ?? '',
       patient: patient,
       date: data['date'] != null
-          ? DateTime.tryParse(data['date'].toString()) ?? DateTime.now()
-          : DateTime.now(),
+          ? DateTime.tryParse(data['date'].toString())?.toUtc() ?? DateTime.now().toUtc()
+          : DateTime.now().toUtc(),
       type: data['type'] ?? '',
       clinicId: data['clinicId'] ?? '',
       isWaiting: data['isWaiting'] ?? false,
@@ -50,7 +50,7 @@ class Appointment {
   Map<String, dynamic> toMap() {
     return {
       'patientId': patientId,
-      'date': date.toIso8601String(),
+      'date': date.toUtc().toIso8601String(),
       'type': type,
       'clinicId': clinicId,
       'isWaiting': isWaiting,

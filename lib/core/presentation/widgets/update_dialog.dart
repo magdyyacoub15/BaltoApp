@@ -78,7 +78,13 @@ class _UpdateDialogState extends ConsumerState<UpdateDialog> {
           children: [
             const Icon(Icons.system_update, color: Colors.blue),
             const SizedBox(width: 10),
-            Text(ref.tr('update_available_title')),
+            Flexible(
+              child: Text(
+                ref.tr('update_available_title'),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         content: Column(

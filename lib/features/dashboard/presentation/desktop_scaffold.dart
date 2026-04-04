@@ -7,6 +7,7 @@ import '../../appointments/presentation/patient_reminders_screen.dart';
 import '../../auth/data/auth_repository.dart';
 import '../../profile/presentation/account_screen.dart';
 import '../../../core/localization/language_provider.dart';
+import '../../../core/services/polling_service.dart';
 
 class DesktopScaffold extends ConsumerStatefulWidget {
   const DesktopScaffold({super.key});
@@ -53,6 +54,9 @@ class _DesktopScaffoldState extends ConsumerState<DesktopScaffold> {
                   title: Text(ref.tr('dashboard_title')),
                   selected: _selectedIndex == 0,
                   onTap: () {
+                    if (_selectedIndex != 0) {
+                      ref.read(pageRefreshProvider.notifier).refresh();
+                    }
                     setState(() {
                       _selectedIndex = 0;
                     });
@@ -63,6 +67,9 @@ class _DesktopScaffoldState extends ConsumerState<DesktopScaffold> {
                   title: Text(ref.tr('patients_record')),
                   selected: _selectedIndex == 1,
                   onTap: () {
+                    if (_selectedIndex != 1) {
+                      ref.read(pageRefreshProvider.notifier).refresh();
+                    }
                     setState(() {
                       _selectedIndex = 1;
                     });
@@ -73,6 +80,9 @@ class _DesktopScaffoldState extends ConsumerState<DesktopScaffold> {
                   title: Text(ref.tr('accounts_and_finances')),
                   selected: _selectedIndex == 2,
                   onTap: () {
+                    if (_selectedIndex != 2) {
+                      ref.read(pageRefreshProvider.notifier).refresh();
+                    }
                     setState(() {
                       _selectedIndex = 2;
                     });
@@ -83,6 +93,9 @@ class _DesktopScaffoldState extends ConsumerState<DesktopScaffold> {
                   title: Text(ref.tr('nav_reminders')),
                   selected: _selectedIndex == 3,
                   onTap: () {
+                    if (_selectedIndex != 3) {
+                      ref.read(pageRefreshProvider.notifier).refresh();
+                    }
                     setState(() {
                       _selectedIndex = 3;
                     });
@@ -93,6 +106,9 @@ class _DesktopScaffoldState extends ConsumerState<DesktopScaffold> {
                   title: Text(ref.tr('nav_profile')),
                   selected: _selectedIndex == 4,
                   onTap: () {
+                    if (_selectedIndex != 4) {
+                      ref.read(pageRefreshProvider.notifier).refresh();
+                    }
                     setState(() {
                       _selectedIndex = 4;
                     });

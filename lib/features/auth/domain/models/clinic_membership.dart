@@ -29,7 +29,7 @@ class ClinicMembership {
       role: data['role'] ?? 'secretary',
       status: data['status'] ?? 'pending',
       joinedAt: data['joinedAt'] != null
-          ? (data['joinedAt'] as dynamic).toDate()
+          ? (DateTime.tryParse(data['joinedAt'].toString()) ?? DateTime.now())
           : DateTime.now(),
     );
   }

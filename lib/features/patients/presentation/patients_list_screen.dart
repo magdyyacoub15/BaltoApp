@@ -764,52 +764,55 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
     );
   }
 
-  Future<void> _showDeletePatientDialog(
-    BuildContext context,
-    WidgetRef ref,
-    patient,
-  ) async {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => DeleteConfirmationDialog(
-        title: ref.tr('delete_patient'),
-        content: ref.tr('delete_confirm_patient', [patient.name]),
-        onDelete: () async {
-          if (!context.mounted) return;
+  Future<bool> _checkPermission(BuildContext context, WidgetRef ref) async {
+    final clinic = ref.read(clinicStreamProvider).value;
+    if (clinic == null) return false;
 
-          final clinic = ref.read(clinicStreamProvider).value;
-          if (clinic == null) return;
-
-          final canWrite = await ref
-              .read(permissionServiceProvider)
-              .canWrite(clinic.id);
-          if (!canWrite) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(ref.tr('delete_failed_subs'))),
-              );
-            }
-            return;
-          }
-
-          try {
-            await ref.read(patientRepositoryProvider).deletePatient(patient);
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(ref.tr('patient_deleted'))),
-              );
-            }
-          } catch (e) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text(ref.tr('error_occurred', [e]))),
-              );
-            }
-          }
-        },
-      ),
-    );
+    final canWrite = await ref
+        .read(permissionServiceProvider)
+        .canWrite(clinic.id)
+        .timeout(const Duration(milliseconds: 1500), onTimeout: () => true); // Default to allow if check hangs during UI transition
+    
+    if (!canWrite) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ref.tr('delete_failed_subs'))),
+        );
+      }
+      return false;
+    }
+    return true;
   }
+
+  void _executeDeleteInstant(BuildContext context, WidgetRef ref, patient) {
+    try {
+      debugPrint('🗑️ [Tracer] Deletion execution started (Instant): ${patient.name}');
+      
+      // 1. Add to local "Deleted IDs" synchronously to hide it from the UI IMMEDIATELY
+      ref.read(deletedPatientIdsProvider.notifier).add(patient.id);
+
+      // 2. Perform repository delete (starts sync removal from cache)
+      ref.read(patientRepositoryProvider).deletePatient(patient);
+      
+      // 3. Trigger UI Refresh to keep other providers in sync
+      ref.read(patientsRefreshProvider.notifier).refresh();
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ref.tr('patient_deleted'))),
+        );
+        debugPrint('✅ [Tracer] Deletion success: ${patient.name}');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ref.tr('error_occurred', [e]))),
+        );
+      }
+    }
+  }
+
+
 
   Widget _buildEmptyState() {
     return Padding(
@@ -840,111 +843,147 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
     ).format(patient.lastVisit);
     final visitCount = patient.records.length;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(25),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withAlpha(30)),
-      ),
-      child: InkWell(
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PatientProfileScreen(patient: patient),
-          ),
+    return Dismissible(
+      key: Key('patient_${patient.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: Colors.red.shade400,
+          borderRadius: BorderRadius.circular(24),
         ),
-        borderRadius: BorderRadius.circular(24),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Row(
-            children: [
-              Container(
-                width: 65,
-                height: 65,
-                decoration: BoxDecoration(
-                  color: Colors.white.withAlpha(30),
-                  borderRadius: BorderRadius.circular(20),
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.only(left: 20),
+        child: const Icon(
+          Icons.delete_outline,
+          color: Colors.white,
+          size: 28,
+        ),
+      ),
+      confirmDismiss: (direction) async {
+        debugPrint('🎯 [Tracer] Swipe-to-delete initiated for: ${patient.name}');
+        
+        // 1. Initial Permission Check before even showing the dialog
+        final hasPermission = await _checkPermission(context, ref);
+        if (!hasPermission) return false;
+
+        // 2. Show Confirmation Dialog
+        if (!context.mounted) return false;
+        return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => DeleteConfirmationDialog(
+            title: ref.tr('delete_patient'),
+            content: ref.tr('delete_confirm_patient', [patient.name]),
+            onDelete: () {},
+          ),
+        );
+      },
+      onDismissed: (direction) {
+        // Fast execution, no await here to prevent UI hang
+        _executeDeleteInstant(context, ref, patient);
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 0), // Child in Dismissible doesn't need margin bottom
+        decoration: BoxDecoration(
+          color: Colors.white.withAlpha(25),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withAlpha(30)),
+        ),
+        child: InkWell(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PatientProfileScreen(patient: patient),
+            ),
+          ),
+          borderRadius: BorderRadius.circular(24),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Row(
+              children: [
+                Container(
+                  width: 65,
+                  height: 65,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(30),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const ScaledIcon(
+                    Icons.person,
+                    color: Colors.white,
+                    size: 35,
+                  ),
                 ),
-                child: const ScaledIcon(
-                  Icons.person,
-                  color: Colors.white,
-                  size: 35,
-                ),
-              ),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        patient.name,
-                        maxLines: 1,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      children: [
-                        _buildBadge(
-                          context,
-                          ref.tr('age_years', [patient.age.toString()]),
-                          Colors.white.withAlpha(40),
-                          Colors.white,
-                        ),
-                        _buildBadge(
-                          context,
-                          ref.tr('visit_count', [visitCount.toString()]),
-                          Colors.white.withAlpha(40),
-                          Colors.white,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        const ScaledIcon(
-                          Icons.calendar_month_outlined,
-                          size: 14,
-                          color: Colors.white70,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            ref.tr('last_visit_formatted', [
-                              lastVisitFormatted,
-                            ]),
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Colors.white70,
-                            ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          patient.name,
+                          maxLines: 1,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Colors.white,
                           ),
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          _buildBadge(
+                            context,
+                            ref.tr('age_years', [patient.age.toString()]),
+                            Colors.white.withAlpha(40),
+                            Colors.white,
+                          ),
+                          _buildBadge(
+                            context,
+                            ref.tr('visit_count', [visitCount.toString()]),
+                            Colors.white.withAlpha(40),
+                            Colors.white,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          const ScaledIcon(
+                            Icons.calendar_month_outlined,
+                            size: 14,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              ref.tr('last_visit_formatted', [
+                                lastVisitFormatted,
+                              ]),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.white70,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                onPressed: () =>
-                    _showDeletePatientDialog(context, ref, patient),
-              ),
-              const ScaledIcon(
-                Icons.arrow_forward_ios_rounded,
-                size: 16,
-                color: Colors.white30,
-              ),
-            ],
+                // Deleted explicit IconButton here as it's replaced by swipe
+                const ScaledIcon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 16,
+                  color: Colors.white30,
+                ),
+              ],
+            ),
           ),
         ),
       ),

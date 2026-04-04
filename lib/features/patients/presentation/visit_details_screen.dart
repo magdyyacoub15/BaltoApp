@@ -58,17 +58,23 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     );
     _weightController = TextEditingController(
       text: widget.record.vitalSigns?.weight != 0
-          ? widget.record.vitalSigns?.weight.toString()
+          ? (widget.record.vitalSigns!.weight % 1 == 0
+              ? widget.record.vitalSigns!.weight.toInt().toString()
+              : widget.record.vitalSigns!.weight.toString())
           : '',
     );
     _tempController = TextEditingController(
       text: widget.record.vitalSigns?.temperature != 0
-          ? widget.record.vitalSigns?.temperature.toString()
+          ? (widget.record.vitalSigns!.temperature % 1 == 0
+              ? widget.record.vitalSigns!.temperature.toInt().toString()
+              : widget.record.vitalSigns!.temperature.toString())
           : '',
     );
     _sugarController = TextEditingController(
       text: widget.record.vitalSigns?.sugarLevel != 0
-          ? widget.record.vitalSigns?.sugarLevel.toString()
+          ? (widget.record.vitalSigns!.sugarLevel % 1 == 0
+              ? widget.record.vitalSigns!.sugarLevel.toInt().toString()
+              : widget.record.vitalSigns!.sugarLevel.toString())
           : '',
     );
     _attachmentUrls = List.from(widget.record.attachmentUrls);
@@ -554,6 +560,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   }
 
   Future<void> _printPrescription() async {
+    debugPrint('🖨️ [Tracer] Printing prescription for: ${widget.patient.name}, date: ${widget.record.date}');
     final clinic = ref.read(clinicStreamProvider).value;
     if (clinic == null) return;
 

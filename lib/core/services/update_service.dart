@@ -48,7 +48,12 @@ class UpdateService {
 
   Future<int> getLocalUpdateCode() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_kLocalUpdateCode) ?? 0;
+    int? localCode = prefs.getInt(_kLocalUpdateCode);
+    if (localCode == null) {
+      localCode = 1;
+      await saveLocalUpdateCode(localCode);
+    }
+    return localCode;
   }
 
   Future<void> saveLocalUpdateCode(int code) async {

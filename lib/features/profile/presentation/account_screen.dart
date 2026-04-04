@@ -86,7 +86,10 @@ class AccountScreen extends ConsumerWidget {
                                       onPressed: () {
                                         final user = ref.read(currentUserProvider).value;
                                         if (user != null) {
-                                          _showClinicsDialog(context, ref, user.id, user.clinicId);
+                                          _showClinicsDialog(
+                                            context, ref, user.id, user.clinicId,
+                                            userEmail: user.email,
+                                          );
                                         }
                                       },
                                       tooltip: ref.tr('my_groups'),
@@ -568,8 +571,9 @@ class AccountScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     String userId,
-    String activeClinicId,
-  ) {
+    String activeClinicId, {
+    String userEmail = '',
+  }) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -577,6 +581,7 @@ class AccountScreen extends ConsumerWidget {
         userId: userId,
         activeClinicId: activeClinicId,
         authRepo: ref.read(authRepositoryProvider),
+        userEmail: userEmail,
       ),
     );
   }
@@ -812,6 +817,7 @@ class AccountScreen extends ConsumerWidget {
                   await ref
                       .read(authRepositoryProvider)
                       .updateClinic(updatedClinic);
+                  ref.invalidate(clinicStreamProvider);
                   if (context.mounted) {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(

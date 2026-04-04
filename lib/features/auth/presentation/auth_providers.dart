@@ -1,6 +1,7 @@
 import 'package:appwrite/appwrite.dart';
 // ignore_for_file: deprecated_member_use
 import 'package:appwrite/models.dart' as models;
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/models/app_user.dart';
 import '../domain/models/clinic_group.dart';
@@ -40,7 +41,8 @@ final clinicStreamProvider = StreamProvider<ClinicGroup?>((ref) async* {
   final cache = ref.read(hiveCacheServiceProvider);
   final cacheKey = 'clinic_${user.clinicId}';
 
-  // Fetch clinic data once at startup
+  // Background polling trigger ensures we see "End Day" from other devices
+  ref.watch(pollingTickProvider);
 
   // 1. Yield cached (Immediate)
   final cached = cache.getCachedValue(cacheKey);
@@ -62,18 +64,18 @@ final clinicStreamProvider = StreamProvider<ClinicGroup?>((ref) async* {
   }
 });
 
-// Provider for the visibility threshold (24 hours ago OR last manual reset)
+// Provider for the visibility threshold
 final clinicVisibilityThresholdProvider = Provider<DateTime>((ref) {
   final clinic = ref.watch(clinicStreamProvider).value;
-  final now = DateTime.now();
-  final twentyFourHoursAgo = now.subtract(const Duration(hours: 24));
-
-  if (clinic?.lastShiftReset != null) {
-    return clinic!.lastShiftReset!.isAfter(twentyFourHoursAgo)
-        ? clinic.lastShiftReset!
-        : twentyFourHoursAgo;
-  }
-  return twentyFourHoursAgo;
+  
+  // Detailed tracing for Shift Reset troubleshooting
+  final threshold = clinic?.lastShiftReset?.toUtc() ?? DateTime(2024, 1, 1).toUtc();
+  
+  debugPrint("🔄 [Tracer] visibilityThreshold: ${threshold.toIso8601String()}");
+  debugPrint("🔄 [Tracer] currentDeviceTime (UTC): ${DateTime.now().toUtc().toIso8601String()}");
+  debugPrint("🔄 [Tracer] clinicSource: ${clinic != null ? 'Network/Cache' : 'Default'}");
+  
+  return threshold;
 });
 
 // Helper check for Admins

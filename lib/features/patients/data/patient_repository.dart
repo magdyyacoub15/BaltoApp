@@ -12,6 +12,9 @@ import '../domain/patient.dart';
 import '../domain/models/medical_record.dart';
 import '../../../core/services/appwrite_client.dart';
 
+// Tracks recently modified document IDs to prevent stale server data from overwriting local optimistic cache due to Appwrite eventual consistency.
+final Map<String, DateTime> _recentPatientWrites = {};
+
 final patientRepositoryProvider = Provider((ref) {
   return PatientRepository(
     ref.read(cleanupServiceProvider),
@@ -39,7 +42,6 @@ class PatientRepository {
   Future<List<Patient>> getPatients(String clinicId) async {
     final cached = _cache.getCachedPatients(clinicId);
     if (cached != null) {
-      _refreshPatientsInBackground(clinicId);
       return cached.map((m) => Patient.fromMap(m, m['id'] ?? '')).toList();
     }
     return _fetchAndCachePatients(clinicId);
@@ -69,10 +71,38 @@ class PatientRepository {
         offset += batchSize;
       }
 
+      // Fetch current cache to preserve any optimistic inserts that haven't been indexed by server yet
+      final currentCache = _cache.getCachedPatients(clinicId) ?? [];
+      final serverIds = all.map((p) => p.id).toSet();
+      
+      final now = DateTime.now();
+      final recentlyWrittenIds = _recentPatientWrites.keys
+          .where((id) => now.difference(_recentPatientWrites[id]!).inSeconds < 15)
+          .toSet();
+
+      final missingOptimistics = currentCache.where((m) => 
+         (m['isOptimistic'] == true && !serverIds.contains(m['id'])) ||
+         recentlyWrittenIds.contains(m['id'])
+      );
+
+      // Append optimistics and recent writes that the server hasn't returned (or returned stale)
+      if (missingOptimistics.isNotEmpty) {
+        // Remove potentially stale ones from server response
+        all.removeWhere((p) => recentlyWrittenIds.contains(p.id));
+        all.addAll(missingOptimistics.map((m) => Patient.fromMap(m, m['id'] ?? '')));
+      }
+
       // Update cache with fresh data
       _cache.cachePatients(
         clinicId,
-        all.map((p) => {...p.toMap(), 'id': p.id}).toList(),
+        all.map((p) {
+          final map = p.toMap();
+          map['id'] = p.id;
+          if (missingOptimistics.any((m) => m['id'] == p.id)) {
+            map['isOptimistic'] = true;
+          }
+          return map;
+        }).toList(),
       );
 
       return all;
@@ -86,39 +116,14 @@ class PatientRepository {
   }
 
   void _refreshPatientsInBackground(String clinicId) {
-    _fetchAndCachePatients(clinicId).catchError((e) {
+    _fetchAndCachePatients(clinicId).then((_) {}).catchError((e) {
       debugPrint('PatientRepository: background refresh error: $e');
-      return <Patient>[];
     });
   }
 
   Future<List<Patient>> _fetchAndCachePatients(String clinicId) async {
     try {
-      final List<Patient> all = [];
-      int offset = 0;
-      const int batchSize = 100;
-
-      while (true) {
-        final res = await _databases.listRows(
-          databaseId: appwriteDatabaseId,
-          tableId: 'patients',
-          queries: [
-            Query.equal('clinicId', clinicId),
-            Query.limit(batchSize),
-            Query.offset(offset),
-          ],
-        );
-        final batch = res.rows.map((d) => Patient.fromMap(d.data, d.$id));
-        all.addAll(batch);
-        if (res.rows.length < batchSize) break;
-        offset += batchSize;
-      }
-
-      _cache.cachePatients(
-        clinicId,
-        all.map((p) => {...p.toMap(), 'id': p.id}).toList(),
-      );
-      return all;
+      return await fetchLivePatients(clinicId);
     } catch (_) {
       final cached = _cache.getCachedPatients(clinicId);
       return cached?.map((m) => Patient.fromMap(m, m['id'] ?? '')).toList() ??
@@ -129,75 +134,99 @@ class PatientRepository {
   // ─── Offline-aware Writes ──────────────────────────────────────────────────
 
   Future<String> addPatient(Patient patient) async {
-    final docId = ID.unique(); // generate ID upfront (needed offline too)
-    final data = patient.toMap();
-    final isOnline = await checkIsOnline();
+    final docId = ID.unique();
+    final patientWithId = patient.copyWith(id: docId);
 
-    if (isOnline) {
-      try {
-        await _databases.createRow(
+    // 1. Optimistic Update — IMMEDIATE, no network wait
+    _recentPatientWrites[docId] = DateTime.now();
+    _applyPatientToCache(patientWithId, patient.clinicId, operation: 'create');
+
+    // 2. Network sync in background (fire-and-forget)
+    _persistPatientCreate(docId, patient.toMap(), patient.clinicId);
+
+    return docId; // returns INSTANTLY
+  }
+
+  void _persistPatientCreate(
+      String docId, Map<String, dynamic> data, String clinicId) {
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        _databases
+            .createRow(
           databaseId: appwriteDatabaseId,
           tableId: 'patients',
           rowId: docId,
           data: data,
           permissions: [
-            Permission.read(Role.team(patient.clinicId)),
-            Permission.update(Role.team(patient.clinicId)),
-            Permission.delete(Role.team(patient.clinicId, 'admin')),
+            Permission.read(Role.team(clinicId)),
+            Permission.update(Role.team(clinicId)),
+            Permission.delete(Role.team(clinicId, 'admin')),
           ],
-        );
-        await _fetchAndCachePatients(patient.clinicId);
-        return docId;
-      } catch (_) {
-        // fall through to offline path
+        )
+            .then((_) {
+          _refreshPatientsInBackground(clinicId);
+        }).catchError((_) {
+          _queue.enqueue(
+              table: 'patients',
+              operation: 'create',
+              rowId: docId,
+              data: data,
+              clinicId: clinicId);
+          debugPrint('📥 [PatientRepo] addPatient queued offline: $docId');
+        });
+      } else {
+        _queue.enqueue(
+            table: 'patients',
+            operation: 'create',
+            rowId: docId,
+            data: data,
+            clinicId: clinicId);
+        debugPrint('📥 [PatientRepo] addPatient queued offline: $docId');
       }
-    }
-
-    // Offline path: apply optimistically to cache + enqueue
-    _applyPatientToCache(
-      patient.copyWith(id: docId),
-      patient.clinicId,
-      operation: 'create',
-    );
-    _queue.enqueue(
-      table: 'patients',
-      operation: 'create',
-      rowId: docId,
-      data: data,
-      clinicId: patient.clinicId,
-    );
-    debugPrint('📥 [PatientRepo] addPatient queued offline: $docId');
-    return docId;
+    });
   }
 
   Future<void> updatePatient(Patient patient) async {
-    final data = patient.toMap();
-    final isOnline = await checkIsOnline();
+    // 1. Optimistic Update — IMMEDIATE, no network wait
+    _recentPatientWrites[patient.id] = DateTime.now();
+    _applyPatientToCache(patient, patient.clinicId, operation: 'update');
 
-    if (isOnline) {
-      try {
-        await _databases.updateRow(
+    // 2. Network sync in background (fire-and-forget)
+    _persistPatientUpdate(patient.id, patient.toMap(), patient.clinicId);
+  }
+
+  void _persistPatientUpdate(
+      String docId, Map<String, dynamic> data, String clinicId) {
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        _databases
+            .updateRow(
           databaseId: appwriteDatabaseId,
           tableId: 'patients',
-          rowId: patient.id,
+          rowId: docId,
           data: data,
-        );
-        _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
-        return;
-      } catch (_) {
-        // fall through to offline path
+        )
+            .then((_) {
+          _refreshPatientsInBackground(clinicId);
+        }).catchError((_) {
+          _queue.enqueue(
+              table: 'patients',
+              operation: 'update',
+              rowId: docId,
+              data: data,
+              clinicId: clinicId);
+          debugPrint('📥 [PatientRepo] updatePatient queued offline: $docId');
+        });
+      } else {
+        _queue.enqueue(
+            table: 'patients',
+            operation: 'update',
+            rowId: docId,
+            data: data,
+            clinicId: clinicId);
+        debugPrint('📥 [PatientRepo] updatePatient queued offline: $docId');
       }
-    }
-
-    _applyPatientToCache(patient, patient.clinicId, operation: 'update');
-    _queue.enqueue(
-      table: 'patients',
-      operation: 'update',
-      rowId: patient.id,
-      data: data,
-      clinicId: patient.clinicId,
-    );
-    debugPrint('📥 [PatientRepo] updatePatient queued offline: ${patient.id}');
+    });
   }
 
   Future<void> deletePatient(Patient patient) async {
@@ -207,31 +236,38 @@ class PatientRepository {
     // 2. Perform background cleanup (not critical for UI response)
     _startBackgroundCleanup(patient);
 
-    final isOnline = await checkIsOnline();
-    if (isOnline) {
-      try {
-        await _databases.deleteRow(
+    // 3. Network in background
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        _databases
+            .deleteRow(
           databaseId: appwriteDatabaseId,
           tableId: 'patients',
           rowId: patient.id,
-        );
-        _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
-        return;
-      } catch (_) {
-        // fall through to offline path
+        )
+            .then((_) {
+          _fetchAndCachePatients(patient.clinicId).catchError((_) => <Patient>[]);
+        }).catchError((_) {
+          _queue.enqueue(
+              table: 'patients',
+              operation: 'delete',
+              rowId: patient.id,
+              data: {},
+              clinicId: patient.clinicId);
+        });
+      } else {
+        _queue.enqueue(
+            table: 'patients',
+            operation: 'delete',
+            rowId: patient.id,
+            data: {},
+            clinicId: patient.clinicId);
+        debugPrint('📥 [PatientRepo] deletePatient queued offline: ${patient.id}');
       }
-    }
-
-    // 3. Offline backup: enqueue for later sync
-    _queue.enqueue(
-      table: 'patients',
-      operation: 'delete',
-      rowId: patient.id,
-      data: {},
-      clinicId: patient.clinicId,
-    );
-    debugPrint('📥 [PatientRepo] deletePatient queued offline: ${patient.id}');
+    });
   }
+
+
 
   void _startBackgroundCleanup(Patient patient) {
     if (patient.prescriptionImageUrl != null) {
@@ -383,11 +419,14 @@ class PatientRepository {
     List<Map<String, dynamic>> updated;
 
     if (operation == 'create') {
-      updated = [...cached, {...patient.toMap(), 'id': patient.id}];
+      updated = [...cached, {...patient.toMap(), 'id': patient.id, 'isOptimistic': true}];
     } else {
       updated = cached.map((m) {
         if (m['id'] == patient.id) {
-          return {...patient.toMap(), 'id': patient.id};
+          final isOpt = m['isOptimistic'] == true;
+          final mapped = {...patient.toMap(), 'id': patient.id};
+          if (isOpt) mapped['isOptimistic'] = true;
+          return mapped;
         }
         return m;
       }).toList();

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/appointment_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -33,37 +34,52 @@ final appointmentsStreamProvider =
   // Watch triggers that force a rebuild
   ref.watch(appointmentsRefreshProvider);
   ref.watch(pollingTickProvider);
+  ref.watch(pageRefreshProvider);
 
   // 1. Yield cached data immediately
   final cached = await repo.getAppointments(clinicId);
-  if (cached.isNotEmpty) yield _filterAndSort(cached, threshold);
+  yield _filterAndSort(cached, threshold); // Always yield even if empty
 
   // 2. Fetch fresh from network in background
   try {
     final fresh = await repo.fetchLiveAppointments(clinicId);
-    yield _filterAndSort(fresh, threshold);
+    yield _filterAndSort(fresh, threshold); // Always yield
   } catch (_) {
     // Silently ignore network errors if cache is already shown
   }
 });
 
-List<Appointment> _filterAndSort(
-  List<Appointment> all,
-  DateTime threshold,
-) {
+List<Appointment> _filterAndSort(List<Appointment> all, DateTime threshold) {
+  // Show manual appointments that are after the manual shift reset (threshold)
   final filtered = all.where((a) {
-    return a.date.isAfter(threshold) || a.date.isAtSameMomentAs(threshold);
+    bool isAfterThresh = a.date.toUtc().isAfter(threshold);
+    if (!isAfterThresh && a.isManual) {
+        // debugPrint("⚠️ [Tracer] Appointment filtered out: ${a.id} date=${a.date.toIso8601String()} threshold=$threshold");
+    }
+    if (isAfterThresh && a.isManual) {
+        debugPrint("✅ [Tracer] Appointment PASS filter: ${a.id} date=${a.date.toUtc().toIso8601String()} threshold=$threshold");
+    }
+    return a.isManual && isAfterThresh;
   }).toList();
 
   filtered.sort((a, b) {
+    // Completed items always go to the bottom
     if (a.isCompleted && !b.isCompleted) return 1;
     if (!a.isCompleted && b.isCompleted) return -1;
+    
+    // Then those currently being examined (isWaiting == false) go after those waiting
+    if (a.isWaiting != b.isWaiting) {
+      return a.isWaiting ? -1 : 1; 
+    }
+
+    // Finally sort by queue order or date
     if (a.queueOrder != b.queueOrder) {
       return a.queueOrder.compareTo(b.queueOrder);
     }
     return a.date.compareTo(b.date);
   });
 
+  debugPrint("🔄 [Tracer] appointmentsStream: showing=${filtered.length}, total=${all.length} (Threshold: $threshold)");
   return filtered;
 }
 

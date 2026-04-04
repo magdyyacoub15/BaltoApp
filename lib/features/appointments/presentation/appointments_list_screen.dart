@@ -168,6 +168,7 @@ class AppointmentsListScreen extends ConsumerWidget {
                                       isCompleted: true,
                                     ),
                                   );
+                              ref.read(appointmentsRefreshProvider.notifier).refresh();
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.green,
@@ -329,6 +330,7 @@ class AppointmentsListScreen extends ConsumerWidget {
       type: 're_examination',
       clinicId: user.clinicId,
       isWaiting: true,
+      isManual: true,
     );
 
     await ref

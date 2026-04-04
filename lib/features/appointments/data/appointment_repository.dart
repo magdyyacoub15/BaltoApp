@@ -8,6 +8,10 @@ import '../../../core/services/hive_cache_service.dart';
 import '../../../core/services/connectivity_service.dart';
 import '../../../core/services/offline_queue_service.dart';
 
+// Tracks recently modified document IDs to prevent stale server data from overwriting local optimistic cache due to Appwrite eventual consistency.
+// We ignore server data for these IDs for 15 seconds after a local write.
+final Map<String, DateTime> _recentAppointmentsWrites = {};
+
 final appointmentRepositoryProvider = Provider(
   (ref) => AppointmentRepository(
     ref.read(appwriteTablesDBProvider),
@@ -32,7 +36,6 @@ class AppointmentRepository {
     final cached = _cache.getCachedAppointments(clinicId);
 
     if (cached != null) {
-      _refreshAppointmentsInBackground(clinicId);
       final all = cached
           .map((m) => Appointment.fromMap(m, m['id'] ?? ''))
           .toList();
@@ -59,22 +62,59 @@ class AppointmentRepository {
             Query.offset(offset),
           ],
         );
-        final batch =
-            res.rows.map((doc) => Appointment.fromMap(doc.data, doc.$id));
+        final batch = res.rows.map(
+          (doc) => Appointment.fromMap(doc.data, doc.$id),
+        );
         all.addAll(batch);
         if (res.rows.length < batchSize) break;
         offset += batchSize;
       }
 
+      // Fetch current cache to preserve any optimistic inserts that haven't been indexed by server yet
+      final currentCache = _cache.getCachedAppointments(clinicId) ?? [];
+      final serverIds = all.map((a) => a.id).toSet();
+
+      final now = DateTime.now();
+      final recentlyWrittenIds = _recentAppointmentsWrites.keys
+          .where(
+            (id) =>
+                now.difference(_recentAppointmentsWrites[id]!).inSeconds < 15,
+          )
+          .toSet();
+
+      final missingOptimistics = currentCache.where(
+        (m) =>
+            (m['isOptimistic'] == true && !serverIds.contains(m['id'])) ||
+            recentlyWrittenIds.contains(m['id']),
+      ).toList();
+
+      // Append optimistics and recent writes that the server hasn't returned (or returned stale)
+      if (missingOptimistics.isNotEmpty) {
+        // Remove potentially stale ones from server response
+        final missingIds = missingOptimistics.map((m) => m['id']).toSet();
+        all.removeWhere((a) => missingIds.contains(a.id));
+        all.addAll(
+          missingOptimistics.map((m) => Appointment.fromMap(m, m['id'] ?? '')),
+        );
+      }
+
       // Update cache with fresh data
       _cache.cacheAppointments(
         clinicId,
-        all.map((a) => {...a.toMap(), 'id': a.id}).toList(),
+        all.map((a) {
+          final mapped = {...a.toMap(), 'id': a.id};
+          if (missingOptimistics.any((m) => m['id'] == a.id)) {
+            mapped['isOptimistic'] = true;
+          }
+          return mapped;
+        }).toList(),
       );
 
       return all;
     } catch (e) {
-      throw Exception('لا يوجد اتصال بالإنترنت. الصفحة الرئيسية تعمل فقط عند الاتصال بالشبكة.');
+      throw Exception(
+        'لا يوجد اتصال بالإنترنت. الصفحة الرئيسية تعمل فقط عند الاتصال بالشبكة.',
+      );
     }
   }
 
@@ -83,9 +123,8 @@ class AppointmentRepository {
   }
 
   void _refreshAppointmentsInBackground(String clinicId) {
-    _fetchAndCache(clinicId).catchError((e) {
+    _fetchAndCache(clinicId).then((_) {}).catchError((e) {
       debugPrint('AppointmentRepository: bg refresh error: $e');
-      return <Appointment>[];
     });
   }
 
@@ -121,16 +160,49 @@ class AppointmentRepository {
             Query.offset(offset),
           ],
         );
-        final batch =
-            res.rows.map((doc) => Appointment.fromMap(doc.data, doc.$id));
+        final batch = res.rows.map(
+          (doc) => Appointment.fromMap(doc.data, doc.$id),
+        );
         all.addAll(batch);
         if (res.rows.length < batchSize) break;
         offset += batchSize;
       }
 
+      // Fetch current cache to preserve any optimistic inserts that haven't been indexed by server yet
+      final currentCache = _cache.getCachedAppointments(clinicId) ?? [];
+      final serverIds = all.map((a) => a.id).toSet();
+
+      final now = DateTime.now();
+      final recentlyWrittenIds = _recentAppointmentsWrites.keys
+          .where(
+            (id) =>
+                now.difference(_recentAppointmentsWrites[id]!).inSeconds < 15,
+          )
+          .toSet();
+
+      final missingOptimistics = currentCache.where(
+        (m) =>
+            (m['isOptimistic'] == true && !serverIds.contains(m['id'])) ||
+            recentlyWrittenIds.contains(m['id']),
+      );
+
+      // Merge optimistics and recent writes into the list
+      if (missingOptimistics.isNotEmpty) {
+        all.removeWhere((a) => recentlyWrittenIds.contains(a.id));
+        all.addAll(
+          missingOptimistics.map((m) => Appointment.fromMap(m, m['id'] ?? '')),
+        );
+      }
+
       _cache.cacheAppointments(
         clinicId,
-        all.map((a) => {...a.toMap(), 'id': a.id}).toList(),
+        all.map((a) {
+          final mapped = {...a.toMap(), 'id': a.id};
+          if (missingOptimistics.any((m) => m['id'] == a.id)) {
+            mapped['isOptimistic'] = true;
+          }
+          return mapped;
+        }).toList(),
       );
 
       return _filterAndSort(all, date: date, startAfter: startAfter);
@@ -161,10 +233,9 @@ class AppointmentRepository {
     }
 
     final docs = all.where((appt) {
-      final isAfter =
-          appt.date.isAfter(startThreshold) ||
-          appt.date.isAtSameMomentAs(startThreshold);
-      final isBefore = endThreshold == null || appt.date.isBefore(endThreshold);
+      final apptUtc = appt.date.toUtc();
+      final isAfter = apptUtc.isAfter(startThreshold.toUtc());
+      final isBefore = endThreshold == null || apptUtc.isBefore(endThreshold.toUtc());
       return isAfter && isBefore;
     }).toList();
 
@@ -199,105 +270,200 @@ class AppointmentRepository {
 
   Future<void> addAppointment(Appointment appointment) async {
     final docId = ID.unique();
-    final data = appointment.toMap();
-    final isOnline = await checkIsOnline();
+    final appointmentWithId = appointment.copyWith(id: docId);
+    final data = appointmentWithId.toMap();
 
-    if (isOnline) {
-      try {
-        await _databases.createRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'appointments',
+    // 1. Optimistic cache update — IMMEDIATE
+    _applyToCache(appointmentWithId, appointment.clinicId, operation: 'create');
+
+    // 2. Network in background
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        _databases
+            .createRow(
+              databaseId: appwriteDatabaseId,
+              tableId: 'appointments',
+              rowId: docId,
+              data: data,
+            )
+            .then((_) {
+              _refreshAppointmentsInBackground(appointment.clinicId);
+            })
+            .catchError((_) {
+              _queue.enqueue(
+                table: 'appointments',
+                operation: 'create',
+                rowId: docId,
+                data: data,
+                clinicId: appointment.clinicId,
+              );
+              debugPrint(
+                '📥 [AppointmentRepo] addAppointment queued offline: $docId',
+              );
+            });
+      } else {
+        _queue.enqueue(
+          table: 'appointments',
+          operation: 'create',
           rowId: docId,
           data: data,
+          clinicId: appointment.clinicId,
         );
-        _refreshAppointmentsInBackground(appointment.clinicId);
-        return;
-      } catch (_) {
-        // fall through to offline path
+        debugPrint(
+          '📥 [AppointmentRepo] addAppointment queued offline: $docId',
+        );
       }
-    }
-
-    _applyToCache(appointment.copyWith(id: docId), appointment.clinicId,
-        operation: 'create');
-    _queue.enqueue(
-      table: 'appointments',
-      operation: 'create',
-      rowId: docId,
-      data: data,
-      clinicId: appointment.clinicId,
-    );
-    debugPrint('📥 [AppointmentRepo] addAppointment queued offline: $docId');
+    });
   }
 
   Future<void> updateAppointment(Appointment appointment) async {
     final data = appointment.toMap();
-    final isOnline = await checkIsOnline();
 
-    if (isOnline) {
-      try {
-        await _databases.updateRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'appointments',
+    // 1. Optimistic cache update — IMMEDIATE
+    _applyToCache(appointment, appointment.clinicId, operation: 'update');
+
+    // 2. Network in background
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        _databases
+            .updateRow(
+              databaseId: appwriteDatabaseId,
+              tableId: 'appointments',
+              rowId: appointment.id,
+              data: data,
+            )
+            .then((_) {
+              _refreshAppointmentsInBackground(appointment.clinicId);
+            })
+            .catchError((_) {
+              _queue.enqueue(
+                table: 'appointments',
+                operation: 'update',
+                rowId: appointment.id,
+                data: data,
+                clinicId: appointment.clinicId,
+              );
+              debugPrint(
+                '📥 [AppointmentRepo] updateAppointment queued offline: ${appointment.id}',
+              );
+            });
+      } else {
+        _queue.enqueue(
+          table: 'appointments',
+          operation: 'update',
           rowId: appointment.id,
           data: data,
+          clinicId: appointment.clinicId,
         );
-        _refreshAppointmentsInBackground(appointment.clinicId);
-        return;
-      } catch (_) {
-        // fall through to offline path
+        debugPrint(
+          '📥 [AppointmentRepo] updateAppointment queued offline: ${appointment.id}',
+        );
       }
-    }
-
-    _applyToCache(appointment, appointment.clinicId, operation: 'update');
-    _queue.enqueue(
-      table: 'appointments',
-      operation: 'update',
-      rowId: appointment.id,
-      data: data,
-      clinicId: appointment.clinicId,
-    );
-    debugPrint(
-      '📥 [AppointmentRepo] updateAppointment queued offline: ${appointment.id}',
-    );
+    });
   }
 
   Future<void> updateQueueOrder(List<Appointment> appointments) async {
-    // Each reorder is an update — batch them
+    if (appointments.isEmpty) return;
+
+    final clinicId = appointments.first.clinicId;
+
+    // 1. Single Bulk Optimistic Update — IMMEDIATE
+    final cached = _cache.getCachedAppointments(clinicId) ?? [];
+    final updatedCache = List<Map<String, dynamic>>.from(cached);
+
+    final now = DateTime.now();
     for (final appt in appointments) {
-      await updateAppointment(appt);
+      final index = updatedCache.indexWhere((m) => m['id'] == appt.id);
+      if (index != -1) {
+        updatedCache[index] = {...appt.toMap(), 'id': appt.id};
+      }
+      _recentAppointmentsWrites[appt.id] = now;
     }
+
+    _cache.cacheAppointments(clinicId, updatedCache);
+
+    // 2. Parallel Network Writes in background
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        Future.wait(
+          appointments.map((appt) async {
+            try {
+              await _databases.updateRow(
+                databaseId: appwriteDatabaseId,
+                tableId: 'appointments',
+                rowId: appt.id,
+                data: appt.toMap(),
+              );
+            } catch (e) {
+              debugPrint(
+                '⚠️ [AppointmentRepo] reorder failed for ${appt.id}: $e',
+              );
+              _queue.enqueue(
+                table: 'appointments',
+                operation: 'update',
+                rowId: appt.id,
+                data: appt.toMap(),
+                clinicId: clinicId,
+              );
+            }
+          }),
+        ).then((_) => _refreshAppointmentsInBackground(clinicId));
+      } else {
+        for (final appt in appointments) {
+          _queue.enqueue(
+            table: 'appointments',
+            operation: 'update',
+            rowId: appt.id,
+            data: appt.toMap(),
+            clinicId: clinicId,
+          );
+        }
+      }
+    });
   }
 
   Future<void> deleteAppointment(String id, String clinicId) async {
-    final isOnline = await checkIsOnline();
-
-    if (isOnline) {
-      try {
-        await _databases.deleteRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'appointments',
-          rowId: id,
-        );
-        _refreshAppointmentsInBackground(clinicId);
-        return;
-      } catch (_) {
-        // fall through to offline path
-      }
-    }
-
+    // 1. Optimistic UI Update — IMMEDIATE
     final cached = _cache.getCachedAppointments(clinicId) ?? [];
     _cache.cacheAppointments(
       clinicId,
       cached.where((m) => m['id'] != id).toList(),
     );
-    _queue.enqueue(
-      table: 'appointments',
-      operation: 'delete',
-      rowId: id,
-      data: {},
-      clinicId: clinicId,
-    );
-    debugPrint('📥 [AppointmentRepo] deleteAppointment queued offline: $id');
+
+    // 2. Network in background
+    checkIsOnline().then((isOnline) {
+      if (isOnline) {
+        _databases
+            .deleteRow(
+              databaseId: appwriteDatabaseId,
+              tableId: 'appointments',
+              rowId: id,
+            )
+            .then((_) {
+              _refreshAppointmentsInBackground(clinicId);
+            })
+            .catchError((_) {
+              _queue.enqueue(
+                table: 'appointments',
+                operation: 'delete',
+                rowId: id,
+                data: {},
+                clinicId: clinicId,
+              );
+            });
+      } else {
+        _queue.enqueue(
+          table: 'appointments',
+          operation: 'delete',
+          rowId: id,
+          data: {},
+          clinicId: clinicId,
+        );
+        debugPrint(
+          '📥 [AppointmentRepo] deleteAppointment queued offline: $id',
+        );
+      }
+    });
   }
 
   // ─── Cache Helpers ─────────────────────────────────────────────────────────
@@ -311,13 +477,19 @@ class AppointmentRepository {
     List<Map<String, dynamic>> updated;
 
     if (operation == 'create') {
-      updated = [...cached, {...appt.toMap(), 'id': appt.id}];
+      updated = [
+        ...cached,
+        {...appt.toMap(), 'id': appt.id, 'isOptimistic': true},
+      ];
     } else {
       updated = cached.map((m) {
         if (m['id'] == appt.id) return {...appt.toMap(), 'id': appt.id};
         return m;
       }).toList();
     }
+    // Record write timestamp to prevent stale data overwrite during next 15s
+    _recentAppointmentsWrites[appt.id] = DateTime.now();
+
     _cache.cacheAppointments(clinicId, updated);
   }
 }

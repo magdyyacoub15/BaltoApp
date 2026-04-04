@@ -30,6 +30,7 @@ final patientsStreamProvider = StreamProvider<List<Patient>>((ref) async* {
 
   ref.watch(patientsRefreshProvider);
   ref.watch(pollingTickProvider);
+  ref.watch(pageRefreshProvider);
 
   // 1. Yield cached data immediately (no loading spinner)
   final cached = await repo.getPatients(clinicId);
@@ -68,18 +69,36 @@ final patientSortProvider = NotifierProvider<PatientSortNotifier, PatientSort>(
   PatientSortNotifier.new,
 );
 
+// ─── Local UI State for deleted items ────────────────────────────────────────
+// Holds IDs of patients that were just deleted to hide them INSTANTLY from the UI
+class DeletedPatientIdsNotifier extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => {};
+
+  void add(String id) {
+    state = {...state, id};
+  }
+}
+
+final deletedPatientIdsProvider =
+    NotifierProvider<DeletedPatientIdsNotifier, Set<String>>(
+        DeletedPatientIdsNotifier.new);
+
 // ─── Filtered patient list ────────────────────────────────────────────────────
 final filteredPatientsProvider = StreamProvider<List<Patient>>((ref) async* {
   final patientsAsync = ref.watch(patientsStreamProvider);
   final query = ref.watch(searchQueryProvider).toLowerCase();
   final threshold = ref.watch(clinicVisibilityThresholdProvider);
   final sort = ref.watch(patientSortProvider);
+  final deletedIds = ref.watch(deletedPatientIdsProvider);
 
   final patients = patientsAsync.value;
   if (patients == null) return;
 
-  // 1. Exclude new patients added during the current shift
+  // 1. Exclude new patients and LOCALLY DELETED ones
   var filtered = patients.where((p) {
+    if (deletedIds.contains(p.id)) return false; // Filter out immediately
+    
     final isNewToday =
         p.records.length == 1 &&
         (p.lastVisit.isAfter(threshold) ||

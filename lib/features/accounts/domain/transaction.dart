@@ -24,7 +24,7 @@ class AppTransaction {
       'amount': amount,
       'description': description,
       'type': type.name,
-      'date': date.toIso8601String(),
+      'date': date.toUtc().toIso8601String(),
       'clinicId': clinicId,
       if (appointmentId != null) 'appointmentId': appointmentId,
     };
@@ -46,8 +46,8 @@ class AppTransaction {
       description: map['description'] ?? '',
       type: parsedType,
       date: map['date'] != null
-          ? DateTime.tryParse(map['date'].toString()) ?? DateTime.now()
-          : DateTime.now(),
+          ? DateTime.tryParse(map['date'].toString())?.toUtc() ?? DateTime.now().toUtc()
+          : DateTime.now().toUtc(),
       clinicId: map['clinicId'] ?? '',
       appointmentId: map['appointmentId'],
     );

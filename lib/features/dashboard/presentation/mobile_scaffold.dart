@@ -7,6 +7,7 @@ import '../../appointments/presentation/patient_reminders_screen.dart';
 import '../../profile/presentation/account_screen.dart';
 import '../../../core/localization/language_provider.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../../core/services/polling_service.dart';
 
 class MobileScaffold extends ConsumerStatefulWidget {
   const MobileScaffold({super.key});
@@ -70,6 +71,9 @@ class _MobileScaffoldState extends ConsumerState<MobileScaffold> {
         currentIndex: safeIndex,
         type: BottomNavigationBarType.fixed, // Ensure all items are visible
         onTap: (index) {
+          if (_selectedIndex != index) {
+            ref.read(pageRefreshProvider.notifier).refresh();
+          }
           setState(() {
             _selectedIndex = index;
           });
