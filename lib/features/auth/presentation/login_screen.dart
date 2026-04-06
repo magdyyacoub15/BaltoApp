@@ -77,26 +77,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: AnimatedGradientBackground(
         child: Stack(
           children: [
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 10,
-              right: 16,
-              left: 16,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.language, color: Colors.white),
-                    onPressed: () => _showLanguageDialog(context, ref),
-                    tooltip: ref.tr('change_language'),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.format_size, color: Colors.white),
-                    onPressed: () => _showScaleDialog(context, ref),
-                    tooltip: ref.tr('change_scale'),
-                  ),
-                ],
-              ),
-            ),
+
             Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24.0),
@@ -274,6 +255,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
               ),
             ),
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 10,
+              right: 16,
+              left: 16,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.language, color: Colors.white),
+                    onPressed: () => _showLanguageDialog(context, ref),
+                    tooltip: ref.tr('change_language'),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.format_size, color: Colors.white),
+                    onPressed: () => _showScaleDialog(context, ref),
+                    tooltip: ref.tr('change_scale'),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -336,22 +337,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       builder: (context) {
         return AlertDialog(
           title: Text(ref.tr('change_scale')),
-          content: RadioGroup<double>(
-            groupValue: currentScale,
-            onChanged: (val) {
-              if (val != null) {
-                ref.read(appScaleProvider.notifier).setScale(val);
-                Navigator.pop(context);
-              }
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: options.map((opt) {
-                final label = opt['label'] as String;
-                final value = opt['value'] as double;
-                return RadioListTile<double>(title: Text(label), value: value);
-              }).toList(),
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: options.map((opt) {
+              final label = opt['label'] as String;
+              final value = opt['value'] as double;
+              return RadioListTile<double>(
+                title: Text(label),
+                value: value,
+                groupValue: currentScale,
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(appScaleProvider.notifier).setScale(val);
+                    Navigator.pop(context);
+                  }
+                },
+              );
+            }).toList(),
           ),
           actions: [
             TextButton(
@@ -372,27 +374,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       builder: (context) {
         return AlertDialog(
           title: Text(ref.tr('select_language')),
-          content: RadioGroup<String>(
-            groupValue: currentLocale.languageCode,
-            onChanged: (val) {
-              if (val != null) {
-                ref.read(languageProvider.notifier).setLanguage(val);
-                Navigator.pop(context);
-              }
-            },
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                RadioListTile<String>(
-                  title: Text(ref.tr('arabic')),
-                  value: 'ar',
-                ),
-                RadioListTile<String>(
-                  title: Text(ref.tr('english')),
-                  value: 'en',
-                ),
-              ],
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: Text(ref.tr('arabic')),
+                value: 'ar',
+                groupValue: currentLocale.languageCode,
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(languageProvider.notifier).setLanguage(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              RadioListTile<String>(
+                title: Text(ref.tr('english')),
+                value: 'en',
+                groupValue: currentLocale.languageCode,
+                onChanged: (val) {
+                  if (val != null) {
+                    ref.read(languageProvider.notifier).setLanguage(val);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+            ],
           ),
           actions: [
             TextButton(

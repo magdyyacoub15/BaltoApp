@@ -75,16 +75,12 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
 
     _paidController = TextEditingController(
       text: todayRecord != null && todayRecord.paidAmount > 0
-          ? (todayRecord.paidAmount % 1 == 0
-              ? todayRecord.paidAmount.toInt().toString()
-              : todayRecord.paidAmount.toString())
+          ? todayRecord.paidAmount.toString()
           : '',
     );
     _remainingController = TextEditingController(
       text: todayRecord != null && todayRecord.remainingAmount > 0
-          ? (todayRecord.remainingAmount % 1 == 0
-              ? todayRecord.remainingAmount.toInt().toString()
-              : todayRecord.remainingAmount.toString())
+          ? todayRecord.remainingAmount.toString()
           : '',
     );
     _nameController.addListener(_onNameChanged);

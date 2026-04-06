@@ -66,13 +66,8 @@ List<Appointment> _filterAndSort(List<Appointment> all, DateTime threshold) {
     // Completed items always go to the bottom
     if (a.isCompleted && !b.isCompleted) return 1;
     if (!a.isCompleted && b.isCompleted) return -1;
-    
-    // Then those currently being examined (isWaiting == false) go after those waiting
-    if (a.isWaiting != b.isWaiting) {
-      return a.isWaiting ? -1 : 1; 
-    }
 
-    // Finally sort by queue order or date
+    // Sort by queue order or date (isWaiting state does NOT affect position)
     if (a.queueOrder != b.queueOrder) {
       return a.queueOrder.compareTo(b.queueOrder);
     }
@@ -135,35 +130,50 @@ final remindersDateProvider = NotifierProvider<RemindersDateNotifier, DateTime>(
 );
 
 // ─── Upcoming appointments ────────────────────────────────────────────────────
-final upcomingAppointmentsStreamProvider = FutureProvider<List<Appointment>>((
+final upcomingAppointmentsStreamProvider = StreamProvider<List<Appointment>>((
   ref,
-) async {
+) async* {
   final user = await ref.watch(currentUserProvider.future);
+  if (user == null) {
+    yield [];
+    return;
+  }
+  
   final repo = ref.watch(appointmentRepositoryProvider);
   final selectedDate = ref.watch(remindersDateProvider);
 
-  if (user != null) {
-    return await repo.getAppointments(user.clinicId, date: selectedDate);
-  }
-  return [];
+  ref.watch(appointmentsRefreshProvider);
+  ref.watch(pollingTickProvider);
+  ref.watch(pageRefreshProvider);
+
+  // Yield cached immediately to avoid loading flicker
+  yield await repo.getAppointments(user.clinicId, date: selectedDate);
 });
 
 // ─── Enriched upcoming appointments ──────────────────────────────────────────
-final enrichedUpcomingAppointmentsProvider = FutureProvider<List<Appointment>>((
+final enrichedUpcomingAppointmentsProvider = Provider<AsyncValue<List<Appointment>>>((
   ref,
-) async {
-  final appointments = await ref.watch(
-    upcomingAppointmentsStreamProvider.future,
-  );
-  final patients = await ref.watch(patientsStreamProvider.future);
+) {
+  final appointmentsAsync = ref.watch(upcomingAppointmentsStreamProvider);
+  final patientsAsync = ref.watch(patientsStreamProvider);
 
-  return appointments.map((app) {
+  final appointments = appointmentsAsync.value;
+  final patients = patientsAsync.value;
+
+  if (appointments == null || patients == null) {
+    // If either hasn't loaded its first frame, show loading
+    return const AsyncLoading();
+  }
+
+  final enriched = appointments.map((app) {
     final patient = patients.cast<dynamic>().firstWhere(
       (p) => p.id == app.patientId,
       orElse: () => null,
     );
     return app.copyWith(patient: patient);
   }).toList();
+
+  return AsyncData(enriched);
 });
 
 // ─── Local UI State for Dismissed Items ───────────────────────────────────────
@@ -178,4 +188,21 @@ class RemovedAppointmentIdsNotifier extends Notifier<Set<String>> {
 final removedAppointmentIdsProvider = 
     NotifierProvider<RemovedAppointmentIdsNotifier, Set<String>>(
       RemovedAppointmentIdsNotifier.new,
+    );
+
+// ─── Local UI State for "In Examination" (دخول pressed) ──────────────────────
+// This is PURELY local — never written to DB/cache — so it never triggers a
+// queue re-sort. The set is cleared when the appointment is completed (إنهاء).
+class InExaminationIdsNotifier extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => {};
+
+  void enter(String id) => state = {...state, id};
+  void finish(String id) => state = {...state}..remove(id);
+  void clear() => state = {};
+}
+
+final inExaminationIdsProvider =
+    NotifierProvider<InExaminationIdsNotifier, Set<String>>(
+      InExaminationIdsNotifier.new,
     );

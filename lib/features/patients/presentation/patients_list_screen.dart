@@ -25,6 +25,12 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
   late TextEditingController _searchController;
   late FocusNode _searchFocusNode;
 
+  // ─── Local immediate removal set ─────────────────────────────────────────
+  // Updated via setState() SYNCHRONOUSLY inside onDismissed so the item is
+  // removed from the SliverList in the SAME frame — before Flutter asserts
+  // that a dismissed Dismissible is still in the tree.
+  final Set<String> _locallyRemovedIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -322,17 +328,36 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
                 skipLoadingOnRefresh: true,
                 skipLoadingOnReload: true,
                 data: (patients) {
-                  if (patients.isEmpty) {
+                  // Apply local immediate removal FIRST (synchronous setState)
+                  // This prevents the Dismissible assertion crash.
+                  final visiblePatients = _locallyRemovedIds.isEmpty
+                      ? patients
+                      : patients.where((p) => !_locallyRemovedIds.contains(p.id)).toList();
+
+                  if (visiblePatients.isEmpty) {
                     return [SliverToBoxAdapter(child: _buildEmptyState())];
                   }
                   return [
                     SliverPadding(
                       padding: const EdgeInsets.symmetric(horizontal: 24.0),
                       sliver: SliverList(
-                        delegate: SliverChildBuilderDelegate((context, index) {
-                          final patient = patients[index];
-                          return _buildPatientCard(context, ref, patient);
-                        }, childCount: patients.length),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final patient = visiblePatients[index];
+                            return Padding(
+                              key: ValueKey('patient_card_${patient.id}'),
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: _buildPatientCard(context, ref, patient),
+                            );
+                          },
+                          childCount: visiblePatients.length,
+                          findChildIndexCallback: (key) {
+                            if (key is! ValueKey<String>) return null;
+                            final id = key.value.replaceFirst('patient_card_', '');
+                            final index = visiblePatients.indexWhere((p) => p.id == id);
+                            return index >= 0 ? index : null;
+                          },
+                        ),
                       ),
                     ),
                   ];
@@ -786,27 +811,48 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
 
   void _executeDeleteInstant(BuildContext context, WidgetRef ref, patient) {
     try {
-      debugPrint('🗑️ [Tracer] Deletion execution started (Instant): ${patient.name}');
-      
-      // 1. Add to local "Deleted IDs" synchronously to hide it from the UI IMMEDIATELY
+      debugPrint('🗑️ [Delete] Started for patient: ${patient.name} (id: ${patient.id})');
+
+      // STEP 1: Immediately hide from UI via local state (no network needed)
+      // This prevents the Dismissible from seeing the item in the list again
       ref.read(deletedPatientIdsProvider.notifier).add(patient.id);
+      debugPrint('✅ [Delete] Hidden from UI: ${patient.id}');
 
-      // 2. Perform repository delete (starts sync removal from cache)
+      // STEP 2: Remove from local cache immediately
+      // This prevents stale cache from re-showing the patient on next refresh
       ref.read(patientRepositoryProvider).deletePatient(patient);
-      
-      // 3. Trigger UI Refresh to keep other providers in sync
-      ref.read(patientsRefreshProvider.notifier).refresh();
+      debugPrint('✅ [Delete] Cache cleared for: ${patient.id}');
 
+      // STEP 3: Show success feedback
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ref.tr('patient_deleted'))),
+          SnackBar(
+            content: Text(ref.tr('patient_deleted')),
+            duration: const Duration(seconds: 2),
+          ),
         );
-        debugPrint('✅ [Tracer] Deletion success: ${patient.name}');
+        debugPrint('✅ [Delete] Completed successfully: ${patient.name}');
       }
-    } catch (e) {
+
+      // STEP 4: Delayed background refresh (after Dismissible animation fully completes)
+      // We do NOT refresh immediately to avoid race conditions with Dismissible widget
+      Future.delayed(const Duration(milliseconds: 600), () {
+        try {
+          ref.read(patientsRefreshProvider.notifier).refresh();
+          debugPrint('🔄 [Delete] Background refresh triggered for: ${patient.id}');
+        } catch (e) {
+          debugPrint('⚠️ [Delete] Background refresh error (non-critical): $e');
+        }
+      });
+    } catch (e, stack) {
+      debugPrint('❌ [Delete] Error during deletion of ${patient.name}: $e');
+      debugPrint('❌ [Delete] Stack trace: $stack');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ref.tr('error_occurred', [e]))),
+          SnackBar(
+            content: Text(ref.tr('error_occurred', [e])),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -846,8 +892,9 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
     return Dismissible(
       key: Key('patient_${patient.id}'),
       direction: DismissDirection.endToStart,
+      // Slow down collapse to avoid race with provider rebuild
+      resizeDuration: const Duration(milliseconds: 200),
       background: Container(
-        margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
           color: Colors.red.shade400,
           borderRadius: BorderRadius.circular(24),
@@ -861,15 +908,18 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
         ),
       ),
       confirmDismiss: (direction) async {
-        debugPrint('🎯 [Tracer] Swipe-to-delete initiated for: ${patient.name}');
-        
-        // 1. Initial Permission Check before even showing the dialog
-        final hasPermission = await _checkPermission(context, ref);
-        if (!hasPermission) return false;
+        debugPrint('🎯 [Delete] Swipe initiated for: ${patient.name} (id: ${patient.id})');
 
-        // 2. Show Confirmation Dialog
+        // 1. Permission check
+        final hasPermission = await _checkPermission(context, ref);
+        if (!hasPermission) {
+          debugPrint('🚫 [Delete] Blocked — no permission for: ${patient.name}');
+          return false;
+        }
+
+        // 2. Confirmation dialog
         if (!context.mounted) return false;
-        return await showDialog<bool>(
+        final confirmed = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => DeleteConfirmationDialog(
             title: ref.tr('delete_patient'),
@@ -877,13 +927,21 @@ class _PatientsListScreenState extends ConsumerState<PatientsListScreen> {
             onDelete: () {},
           ),
         );
+        debugPrint('📋 [Delete] User confirmed: $confirmed for: ${patient.name}');
+        return confirmed;
       },
       onDismissed: (direction) {
-        // Fast execution, no await here to prevent UI hang
+        debugPrint('💨 [Delete] Dismissible animation done for: ${patient.name}');
+        // CRITICAL: Call setState() FIRST so the item is removed from the
+        // SliverList in the SAME frame before Flutter checks Dismissible state.
+        // Without this, StreamProvider rebuilds asynchronously and Flutter
+        // throws: "A dismissed Dismissible widget is still part of the tree."
+        setState(() {
+          _locallyRemovedIds.add(patient.id);
+        });
         _executeDeleteInstant(context, ref, patient);
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 0), // Child in Dismissible doesn't need margin bottom
         decoration: BoxDecoration(
           color: Colors.white.withAlpha(25),
           borderRadius: BorderRadius.circular(24),

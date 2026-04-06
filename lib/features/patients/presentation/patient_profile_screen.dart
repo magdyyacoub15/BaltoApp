@@ -502,12 +502,12 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
               leading: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).primaryColor.withValues(alpha: 0.08),
+                  color: Colors.white.withAlpha(20),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: ScaledIcon(
+                child: const ScaledIcon(
                   Icons.calendar_month_outlined,
-                  color: Theme.of(context).primaryColor,
+                  color: Colors.white,
                   size: 24,
                 ),
               ),
@@ -520,8 +520,6 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                   fontSize: 15,
                   color: Colors.white,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -566,7 +564,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                     tooltip: ref.tr('print_prescription'),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.edit_note, color: Colors.blue),
+                    icon: const Icon(Icons.edit_note, color: Colors.white),
                     onPressed: () async {
                       final clinic = ref.read(clinicStreamProvider).value;
                       if (clinic == null) return;
@@ -1070,16 +1068,29 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
             onPressed: () => Navigator.pop(innerContext),
             child: Text(ref.tr('cancel')),
           ),
-          ElevatedButton(
-            onPressed: () async {
-              final repo = ref.read(patientRepositoryProvider);
-              await repo.updatePatient(
-                patient.copyWith(chronicDiseases: controller.text.trim()),
-              );
-              if (innerContext.mounted) Navigator.pop(innerContext);
-            },
-            child: Text(ref.tr('save')),
-          ),
+            ElevatedButton(
+              onPressed: () async {
+                final newChronicDiseases = controller.text.trim();
+                debugPrint('🔄 [Tracer] Updating chronic diseases for patient: ${patient.id}');
+                debugPrint('📝 [Tracer] Old diseases: ${patient.chronicDiseases}');
+                debugPrint('📝 [Tracer] New diseases: $newChronicDiseases');
+
+                try {
+                  final repo = ref.read(patientRepositoryProvider);
+                  await repo.updatePatient(
+                    patient.copyWith(chronicDiseases: newChronicDiseases),
+                  );
+                  // Force immediate stream rebuild so UI shows changes instantly instead of waiting
+                  ref.read(patientsRefreshProvider.notifier).refresh();
+                  debugPrint('✅ [Tracer] Chronic diseases updated successfully in cache & server queue');
+                } catch (e) {
+                  debugPrint('❌ [Tracer] Failed to update chronic diseases: $e');
+                }
+
+                if (innerContext.mounted) Navigator.pop(innerContext);
+              },
+              child: Text(ref.tr('save')),
+            ),
         ],
       ),
     );

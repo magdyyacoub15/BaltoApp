@@ -73,6 +73,7 @@ class DashboardScreen extends ConsumerWidget {
                     ref,
                     quickAppointmentsAsync,
                     ref.watch(removedAppointmentIdsProvider),
+                    ref.watch(inExaminationIdsProvider),
                   ),
                   const SizedBox(height: 80), // Padding for FAB
                 ]),
@@ -284,6 +285,7 @@ class DashboardScreen extends ConsumerWidget {
     WidgetRef ref,
     AsyncValue<List<Appointment>> appointmentsAsync,
     Set<String> removedIds,
+    Set<String> inExaminationIds,
   ) {
     return appointmentsAsync.when(
       skipLoadingOnRefresh: true,
@@ -491,12 +493,19 @@ class DashboardScreen extends ConsumerWidget {
                         },
                       ),
                     const SizedBox(width: 4),
-                    if (appt.isWaiting && !appt.isCompleted)
-                      // Stage 1: Waiting → Enter Doctor Room
+                    if (appt.isCompleted)
+                      // Stage 3: Completed
+                      const Icon(
+                        Icons.check_circle_rounded,
+                        color: Colors.green,
+                        size: 24,
+                      )
+                    else if (!inExaminationIds.contains(appt.id))
+                      // Stage 1: Waiting → Enter Doctor Room (local only)
                       SizedBox(
                         height: 32,
                         child: ElevatedButton(
-                          onPressed: () => _toggleWaitingState(context, ref, appt),
+                          onPressed: () => _enterExamination(ref, appt),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
@@ -515,7 +524,7 @@ class DashboardScreen extends ConsumerWidget {
                           ),
                         ),
                       )
-                    else if (!appt.isWaiting && !appt.isCompleted)
+                    else
                       // Stage 2: In Examination → Finish
                       SizedBox(
                         height: 32,
@@ -538,13 +547,6 @@ class DashboardScreen extends ConsumerWidget {
                             ),
                           ),
                         ),
-                      )
-                    else
-                      // Stage 3: Completed
-                      const Icon(
-                        Icons.check_circle_rounded,
-                        color: Colors.green,
-                        size: 24,
                       ),
                   ],
                 ),
@@ -714,20 +716,10 @@ class DashboardScreen extends ConsumerWidget {
     return Colors.white70;
   }
 
-  Future<void> _toggleWaitingState(
-    BuildContext context,
-    WidgetRef ref,
-    Appointment appt,
-  ) async {
-    final user = ref.read(currentUserProvider).value;
-    if (user == null) return;
-    
-    // Toggle waiting status (Waiting → In Examination)
-    await ref
-        .read(appointmentRepositoryProvider)
-        .updateAppointment(appt.copyWith(isWaiting: !appt.isWaiting));
-        
-    ref.read(appointmentsRefreshProvider.notifier).refresh();
+  // دخول: local-only state change — NO database write, NO cache change,
+  // so queue order is NEVER affected.
+  void _enterExamination(WidgetRef ref, Appointment appt) {
+    ref.read(inExaminationIdsProvider.notifier).enter(appt.id);
   }
 
   Future<void> _completeAppointment(
@@ -737,11 +729,14 @@ class DashboardScreen extends ConsumerWidget {
   ) async {
     final user = ref.read(currentUserProvider).value;
     if (user == null) return;
-    
-    // Mark as completed (will stay in list at the bottom until End Day)
+
+    // Remove from local "in examination" set
+    ref.read(inExaminationIdsProvider.notifier).finish(appt.id);
+
+    // Mark as completed (moves to bottom of list)
     await ref
         .read(appointmentRepositoryProvider)
-        .updateAppointment(appt.copyWith(isCompleted: true));
+        .updateAppointment(appt.copyWith(isCompleted: true, isWaiting: false));
 
     // Force refresh
     ref.read(appointmentsRefreshProvider.notifier).refresh();

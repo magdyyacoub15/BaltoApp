@@ -58,23 +58,17 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     );
     _weightController = TextEditingController(
       text: widget.record.vitalSigns?.weight != 0
-          ? (widget.record.vitalSigns!.weight % 1 == 0
-              ? widget.record.vitalSigns!.weight.toInt().toString()
-              : widget.record.vitalSigns!.weight.toString())
+          ? widget.record.vitalSigns?.weight.toString()
           : '',
     );
     _tempController = TextEditingController(
       text: widget.record.vitalSigns?.temperature != 0
-          ? (widget.record.vitalSigns!.temperature % 1 == 0
-              ? widget.record.vitalSigns!.temperature.toInt().toString()
-              : widget.record.vitalSigns!.temperature.toString())
+          ? widget.record.vitalSigns?.temperature.toString()
           : '',
     );
     _sugarController = TextEditingController(
       text: widget.record.vitalSigns?.sugarLevel != 0
-          ? (widget.record.vitalSigns!.sugarLevel % 1 == 0
-              ? widget.record.vitalSigns!.sugarLevel.toInt().toString()
-              : widget.record.vitalSigns!.sugarLevel.toString())
+          ? widget.record.vitalSigns?.sugarLevel.toString()
           : '',
     );
     _attachmentUrls = List.from(widget.record.attachmentUrls);
@@ -511,10 +505,10 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
           Text(
             label,
             softWrap: true,
-            style: TextStyle(
-              fontSize: 13,
+            style: const TextStyle(
+              fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: Colors.blue.shade900,
+              color: Colors.white,
               letterSpacing: 0.3,
             ),
           ),
@@ -525,27 +519,27 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
           focusNode: focusNode,
           maxLines: maxLines,
           style: const TextStyle(
-            color: Colors.black87,
+            color: Colors.white,
             fontSize: 15,
             fontWeight: FontWeight.w500,
           ),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: Colors.blue.shade700, size: 20),
+            prefixIcon: Icon(icon, color: Colors.white70, size: 20),
             filled: true,
-            fillColor: Colors.blue.shade50.withAlpha(30),
+            fillColor: Colors.white.withAlpha(20),
             hintText: '',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.blue.shade100, width: 1),
+              borderSide: BorderSide(color: Colors.white.withAlpha(50), width: 1),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.blue.shade100, width: 1),
+              borderSide: BorderSide(color: Colors.white.withAlpha(50), width: 1),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(
-                color: Theme.of(context).primaryColor,
+              borderSide: const BorderSide(
+                color: Colors.white,
                 width: 2,
               ),
             ),
@@ -756,9 +750,12 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                     ),
                   ),
                   const Spacer(),
-                  Text(
-                    DateFormat('yyyy/MM/dd hh:mm a', ref.read(languageProvider).languageCode).format(widget.record.date),
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  Flexible(
+                    child: Text(
+                      DateFormat('yyyy/MM/dd hh:mm a', ref.read(languageProvider).languageCode).format(widget.record.date),
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      textAlign: TextAlign.right,
+                    ),
                   ),
                 ],
               ),

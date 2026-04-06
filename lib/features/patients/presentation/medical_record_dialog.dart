@@ -76,23 +76,17 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
       );
       _weightController = TextEditingController(
         text: rec.vitalSigns!.weight > 0
-            ? (rec.vitalSigns!.weight % 1 == 0
-                ? rec.vitalSigns!.weight.toInt().toString()
-                : rec.vitalSigns!.weight.toString())
+            ? rec.vitalSigns!.weight.toString()
             : '',
       );
       _tempController = TextEditingController(
         text: rec.vitalSigns!.temperature > 0
-            ? (rec.vitalSigns!.temperature % 1 == 0
-                ? rec.vitalSigns!.temperature.toInt().toString()
-                : rec.vitalSigns!.temperature.toString())
+            ? rec.vitalSigns!.temperature.toString()
             : '',
       );
       _sugarController = TextEditingController(
         text: rec.vitalSigns!.sugarLevel > 0
-            ? (rec.vitalSigns!.sugarLevel % 1 == 0
-                ? rec.vitalSigns!.sugarLevel.toInt().toString()
-                : rec.vitalSigns!.sugarLevel.toString())
+            ? rec.vitalSigns!.sugarLevel.toString()
             : '',
       );
     } else {
@@ -103,18 +97,10 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
     }
 
     _paidController = TextEditingController(
-      text: rec.paidAmount > 0
-          ? (rec.paidAmount % 1 == 0
-              ? rec.paidAmount.toInt().toString()
-              : rec.paidAmount.toString())
-          : '',
+      text: rec.paidAmount > 0 ? rec.paidAmount.toString() : '',
     );
     _remainingController = TextEditingController(
-      text: rec.remainingAmount > 0
-          ? (rec.remainingAmount % 1 == 0
-              ? rec.remainingAmount.toInt().toString()
-              : rec.remainingAmount.toString())
-          : '',
+      text: rec.remainingAmount > 0 ? rec.remainingAmount.toString() : '',
     );
 
     _existingUrls = List.from(rec.attachmentUrls);
