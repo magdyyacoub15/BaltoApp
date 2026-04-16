@@ -1,4 +1,4 @@
-import 'dart:io' if (dart.library.html) 'dart:html';
+import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -161,25 +161,31 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
 
     final List<String> uploadedUrls = [];
     final imgbbService = ref.read(imgbbServiceProvider);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ref.tr('uploading_images', [_visitImages.length])),
-        ),
-      );
-    }
+    int failCount = 0;
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
         final result = await imgbbService.uploadImage(_visitImages[i]);
         if (result != null) {
           uploadedUrls.add(result.url);
+        } else {
+          failCount++;
         }
       } catch (e) {
         debugPrint('Error uploading image $i: $e');
+        failCount++;
       }
     }
+
+    if (failCount > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ref.tr('image_upload_partial_error', [failCount.toString()])),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+
     return uploadedUrls;
   }
 
@@ -740,7 +746,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
                           height: 120,
                         )
                       : Image.file(
-                          File(xFile.path),
+                          io.File(xFile.path),
                           fit: BoxFit.cover,
                           width: 120,
                           height: 120,

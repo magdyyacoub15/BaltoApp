@@ -1,4 +1,4 @@
-import 'dart:io' if (dart.library.html) 'dart:html';
+import 'dart:io' as io;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart';
 
@@ -20,7 +20,7 @@ class CleanupService {
     if (kIsWeb) return; // Local file deletion not supported on Web
     if (path == null || path.isEmpty) return;
     try {
-      final file = File(path);
+      final file = io.File(path);
       if (await file.exists()) {
         await file.delete();
         debugPrint('CleanupService: Deleted local file at $path');

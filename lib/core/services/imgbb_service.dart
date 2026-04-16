@@ -19,7 +19,7 @@ class ImgBBService {
         http.MultipartFile.fromBytes(
           'image',
           bytes,
-          filename: imageFile.name,
+          filename: imageFile.name.isNotEmpty ? imageFile.name : 'upload.jpg',
         ),
       );
 

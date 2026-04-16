@@ -1,4 +1,4 @@
-import 'dart:io' if (dart.library.html) 'dart:html';
+import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -157,17 +157,31 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
 
     final List<String> uploadedUrls = [];
     final imgbbService = ref.read(imgbbServiceProvider);
+    int failCount = 0;
 
     for (var i = 0; i < _visitImages.length; i++) {
       try {
         final result = await imgbbService.uploadImage(_visitImages[i]);
         if (result != null) {
           uploadedUrls.add(result.url);
+        } else {
+          failCount++;
         }
       } catch (e) {
         debugPrint('Error uploading image $i: $e');
+        failCount++;
       }
     }
+
+    if (failCount > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ref.tr('image_upload_partial_error', [failCount.toString()])),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
+
     return uploadedUrls;
   }
 
@@ -1231,7 +1245,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                                   fit: BoxFit.cover,
                                 )
                               : Image.file(
-                                  File(file.path),
+                                  io.File(file.path),
                                   width: 90,
                                   height: 90,
                                   fit: BoxFit.cover,
@@ -1277,7 +1291,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
     } else {
       return kIsWeb
           ? Image.network(url, width: 90, height: 90, fit: BoxFit.cover)
-          : Image.file(File(url), width: 90, height: 90, fit: BoxFit.cover);
+          : Image.file(io.File(url), width: 90, height: 90, fit: BoxFit.cover);
     }
   }
 

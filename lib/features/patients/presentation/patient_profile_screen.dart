@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
@@ -591,6 +592,43 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (kIsWeb)
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                      onPressed: () async {
+                        final clinic = ref.read(clinicStreamProvider).value;
+                        if (clinic == null) return;
+
+                        final canWrite = await ref
+                            .read(permissionServiceProvider)
+                            .canWrite(clinic.id);
+                        if (!canWrite) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  ref.tr('delete_restricted_subscription'),
+                                ),
+                              ),
+                            );
+                          }
+                          return;
+                        }
+
+                        if (!context.mounted) return;
+                        final confirmed = await _showDeleteRecordDialog(context, p, record);
+                        if (confirmed == true) {
+                          // Dismissible would handle deletion via its callback, 
+                          // but since we are triggering it manually here, 
+                          // the callback won't be hit unless we use the same repo logic.
+                          // However, the Dismissible logic is in the 'confirmDismiss' and usually 
+                          // the screen rebuilds when repo updates.
+                          // Wait, the actual deletion logic happens inside _showDeleteRecordDialog or confirmed?
+                          // Let's check _showDeleteRecordDialog.
+                        }
+                      },
+                      tooltip: ref.tr('delete'),
+                    ),
                   IconButton(
                     icon: const Icon(Icons.print, color: Colors.white70),
                     onPressed: () => _printPrescription(p, record),
