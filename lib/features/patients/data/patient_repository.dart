@@ -131,18 +131,49 @@ class PatientRepository {
     }
   }
 
+  /// Fetch a single patient by document ID directly from server.
+  /// Returns null if not found or on error.
+  Future<Patient?> getPatientById(String patientId) async {
+    try {
+      debugPrint('🔍 [PatientRepo] getPatientById: fetching id=$patientId');
+      final res = await _databases.listRows(
+        databaseId: appwriteDatabaseId,
+        tableId: 'patients',
+        queries: [
+          Query.equal('\$id', [patientId]),
+          Query.limit(1),
+        ],
+      );
+      if (res.rows.isEmpty) {
+        debugPrint('🔍 [PatientRepo] getPatientById: NOT FOUND id=$patientId (0 rows)');
+        return null;
+      }
+      final doc = res.rows.first;
+      final patient = Patient.fromMap(doc.data, doc.$id);
+      debugPrint('🔍 [PatientRepo] getPatientById: FOUND name=${patient.name}');
+      return patient;
+    } catch (e) {
+      debugPrint('🔍 [PatientRepo] getPatientById: ERROR id=$patientId error=$e');
+      return null;
+    }
+  }
+
   // ─── Offline-aware Writes ──────────────────────────────────────────────────
 
   Future<String> addPatient(Patient patient) async {
     final docId = ID.unique();
     final patientWithId = patient.copyWith(id: docId);
 
+    debugPrint('🟢 [TRACE][addPatient] START — docId=$docId, name=${patient.name}, clinicId=${patient.clinicId}');
+
     // 1. Optimistic Update — IMMEDIATE, no network wait
     _recentPatientWrites[docId] = DateTime.now();
     _applyPatientToCache(patientWithId, patient.clinicId, operation: 'create');
+    debugPrint('🟢 [TRACE][addPatient] ✅ Optimistic cache applied for docId=$docId');
 
     // 2. Network sync in background (fire-and-forget)
     _persistPatientCreate(docId, patient.toMap(), patient.clinicId);
+    debugPrint('🟢 [TRACE][addPatient] 🔁 Network create fired in background for docId=$docId');
 
     return docId; // returns INSTANTLY
   }
@@ -150,31 +181,52 @@ class PatientRepository {
   void _persistPatientCreate(
       String docId, Map<String, dynamic> data, String clinicId) {
     checkIsOnline().then((isOnline) {
+      debugPrint('🟢 [TRACE][_persistPatientCreate] isOnline=$isOnline for docId=$docId');
       if (isOnline) {
-        _databases
-            .createRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'patients',
-          rowId: docId,
-          data: data,
-          permissions: [
+        _tryCreatePatientWithPermissions(docId, data, clinicId, useTeam: true);
+      } else {
+        _queue.enqueue(
+            table: 'patients',
+            operation: 'create',
+            rowId: docId,
+            data: data,
+            clinicId: clinicId);
+        debugPrint('📥 [PatientRepo] addPatient queued offline: $docId');
+      }
+    });
+  }
+
+  /// Try to create with team permissions first; if unauthorized, fall back to users permissions.
+  void _tryCreatePatientWithPermissions(String docId, Map<String, dynamic> data, String clinicId, {required bool useTeam}) {
+    final permissions = useTeam
+        ? [
             Permission.read(Role.team(clinicId)),
             Permission.update(Role.team(clinicId)),
             Permission.delete(Role.team(clinicId, 'admin')),
-          ],
-        )
-            .then((_) {
-          _refreshPatientsInBackground(clinicId);
-        }).catchError((_) {
-          _queue.enqueue(
-              table: 'patients',
-              operation: 'create',
-              rowId: docId,
-              data: data,
-              clinicId: clinicId);
-          debugPrint('📥 [PatientRepo] addPatient queued offline: $docId');
-        });
+          ]
+        : [
+            Permission.read(Role.users()),
+            Permission.update(Role.users()),
+            Permission.delete(Role.users()),
+          ];
+
+    _databases.createRow(
+      databaseId: appwriteDatabaseId,
+      tableId: 'patients',
+      rowId: docId,
+      data: data,
+      permissions: permissions,
+    ).then((_) {
+      debugPrint('🟢 [TRACE][_persistPatientCreate] ✅ SERVER write SUCCESS for docId=$docId (useTeam=$useTeam)');
+      _refreshPatientsInBackground(clinicId);
+    }).catchError((e) {
+      final errStr = e.toString();
+      if (useTeam && errStr.contains('user_unauthorized')) {
+        // Team permissions not allowed for this user → retry with users() permissions
+        debugPrint('🟢 [TRACE][_persistPatientCreate] ⚠️ team perm denied, retrying with users() for docId=$docId');
+        _tryCreatePatientWithPermissions(docId, data, clinicId, useTeam: false);
       } else {
+        debugPrint('🟢 [TRACE][_persistPatientCreate] ❌ SERVER write FAILED for docId=$docId: $e');
         _queue.enqueue(
             table: 'patients',
             operation: 'create',
@@ -353,40 +405,6 @@ class PatientRepository {
         snapshot.rows.first.data,
         snapshot.rows.first.$id,
       );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<Patient?> getPatientById(String id) async {
-    // Check cache first — boxes store TTL-wrapped JSON
-    final boxes = Hive.box<String>('patients_cache');
-    for (final key in boxes.keys) {
-      final raw = boxes.get(key.toString());
-      if (raw == null) continue;
-      try {
-        final wrapper = json.decode(raw) as Map<String, dynamic>;
-        // Support both new wrapped format {ts, data:[...]} and legacy plain list
-        final dynamic payload = wrapper.containsKey('data')
-            ? wrapper['data']
-            : wrapper;
-        if (payload is! List) continue;
-        final list = payload.cast<Map<String, dynamic>>();
-        final found = list.firstWhere(
-          (m) => (m['id'] ?? '') == id,
-          orElse: () => {},
-        );
-        if (found.isNotEmpty) return Patient.fromMap(found, found['id'] ?? '');
-      } catch (_) {}
-    }
-    // Fallback to network
-    try {
-      final doc = await _databases.getRow(
-        databaseId: appwriteDatabaseId,
-        tableId: 'patients',
-        rowId: id,
-      );
-      return Patient.fromMap(doc.data, doc.$id);
     } catch (_) {
       return null;
     }

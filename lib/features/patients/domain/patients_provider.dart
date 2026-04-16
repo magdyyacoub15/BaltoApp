@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/patient_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -21,26 +22,43 @@ final patientsRefreshProvider =
 final patientsStreamProvider = StreamProvider<List<Patient>>((ref) async* {
   final user = await ref.watch(currentUserProvider.future);
   if (user == null) {
+    debugPrint('🔴 [TRACE][patientsStream] user is NULL → yielding empty');
     yield [];
     return;
   }
 
   final clinicId = user.clinicId;
+  debugPrint('🟢 [TRACE][patientsStream] START — userId=${user.id}, clinicId=$clinicId');
   final repo = ref.watch(patientRepositoryProvider);
 
-  ref.watch(patientsRefreshProvider);
-  ref.watch(pollingTickProvider);
-  ref.watch(pageRefreshProvider);
+  final refreshTick = ref.watch(patientsRefreshProvider);
+  final pollTick = ref.watch(pollingTickProvider).value ?? -1;
+  final pageTick = ref.watch(pageRefreshProvider);
+  debugPrint('🟢 [TRACE][patientsStream] triggers → refresh=$refreshTick, poll=$pollTick, page=$pageTick');
 
   // 1. Yield cached data immediately (no loading spinner)
   final cached = await repo.getPatients(clinicId);
-  if (cached.isNotEmpty) yield cached;
+  debugPrint('🟢 [TRACE][patientsStream] CACHED: total=${cached.length}');
+  if (cached.isNotEmpty) {
+    for (final p in cached) {
+      debugPrint('  👤 [TRACE] cached patient id=${p.id}, name=${p.name}');
+    }
+    yield cached;
+  } else {
+    debugPrint('🟠 [TRACE][patientsStream] CACHED is EMPTY — will wait for live fetch');
+  }
 
   // 2. Fetch fresh from network in background and yield update
   try {
+    debugPrint('🌐 [TRACE][patientsStream] Fetching LIVE patients from server...');
     final fresh = await repo.fetchLivePatients(clinicId);
+    debugPrint('🌐 [TRACE][patientsStream] LIVE: total=${fresh.length}');
+    for (final p in fresh) {
+      debugPrint('  👤 [TRACE] live patient id=${p.id}, name=${p.name}');
+    }
     yield fresh;
-  } catch (_) {
+  } catch (e) {
+    debugPrint('🔴 [TRACE][patientsStream] LIVE fetch error: $e');
     // Silently ignore network errors if cache is already shown
   }
 });

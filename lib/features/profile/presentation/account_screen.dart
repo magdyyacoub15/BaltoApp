@@ -414,23 +414,25 @@ class AccountScreen extends ConsumerWidget {
       builder: (context) {
         return AlertDialog(
           title: Text(ref.tr('change_scale')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: options.map((opt) {
-              final label = opt['label'] as String;
-              final value = opt['value'] as double;
-              return RadioListTile<double>(
-                title: Text(label),
-                value: value,
-                groupValue: currentScale,
-                onChanged: (val) {
-                  if (val != null) {
-                    ref.read(appScaleProvider.notifier).setScale(val);
-                    Navigator.pop(context);
-                  }
-                },
-              );
-            }).toList(),
+          content: RadioGroup<double>(
+            groupValue: currentScale,
+            onChanged: (val) {
+              if (val != null) {
+                ref.read(appScaleProvider.notifier).setScale(val);
+                Navigator.pop(context);
+              }
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: options.map((opt) {
+                final label = opt['label'] as String;
+                final value = opt['value'] as double;
+                return RadioListTile<double>(
+                  title: Text(label),
+                  value: value,
+                );
+              }).toList(),
+            ),
           ),
           actions: [
             TextButton(
@@ -595,32 +597,27 @@ class AccountScreen extends ConsumerWidget {
       builder: (context) {
         return AlertDialog(
           title: Text(ref.tr('select_language')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<String>(
-                title: Text(ref.tr('arabic')),
-                value: 'ar',
-                groupValue: currentLocale.languageCode,
-                onChanged: (val) {
-                  if (val != null) {
-                    ref.read(languageProvider.notifier).setLanguage(val);
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-              RadioListTile<String>(
-                title: Text(ref.tr('english')),
-                value: 'en',
-                groupValue: currentLocale.languageCode,
-                onChanged: (val) {
-                  if (val != null) {
-                    ref.read(languageProvider.notifier).setLanguage(val);
-                    Navigator.pop(context);
-                  }
-                },
-              ),
-            ],
+          content: RadioGroup<String>(
+            groupValue: currentLocale.languageCode,
+            onChanged: (val) {
+              if (val != null) {
+                ref.read(languageProvider.notifier).setLanguage(val);
+                Navigator.pop(context);
+              }
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<String>(
+                  title: Text(ref.tr('arabic')),
+                  value: 'ar',
+                ),
+                RadioListTile<String>(
+                  title: Text(ref.tr('english')),
+                  value: 'en',
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(

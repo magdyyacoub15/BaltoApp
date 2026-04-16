@@ -314,18 +314,17 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
     }
   }
 
-  Future<void> _showDeleteRecordDialog(
+  Future<bool?> _showDeleteRecordDialog(
     BuildContext context,
     Patient patient,
     MedicalRecord record,
   ) async {
-    showDialog(
+    return showDialog<bool>(
       context: context,
       builder: (dialogContext) => DeleteConfirmationDialog(
         title: ref.tr('delete_visit_title'),
         content: ref.tr('delete_visit_desc'),
         onDelete: () async {
-          if (!context.mounted) return;
           try {
             await ref
                 .read(patientRepositoryProvider)
@@ -477,21 +476,55 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
           ref.read(languageProvider).languageCode,
         ).format(record.date);
 
-        return Container(
-          margin: const EdgeInsets.only(bottom: 24),
-          decoration: BoxDecoration(
-            color: Colors.white.withAlpha(50),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: Colors.white.withAlpha(80)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 15,
-                offset: const Offset(0, 8),
-              ),
-            ],
+        return Dismissible(
+          key: ValueKey(record.id),
+          direction: DismissDirection.endToStart,
+          confirmDismiss: (direction) async {
+            final clinic = ref.read(clinicStreamProvider).value;
+            if (clinic == null) return false;
+
+            final canWrite = await ref
+                .read(permissionServiceProvider)
+                .canWrite(clinic.id);
+            if (!canWrite) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ref.tr('delete_restricted_subscription'),
+                    ),
+                  ),
+                );
+              }
+              return false;
+            }
+            return await _showDeleteRecordDialog(context, p, record);
+          },
+          background: Container(
+            margin: const EdgeInsets.only(bottom: 24),
+            decoration: BoxDecoration(
+              color: Colors.red.withAlpha(200),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: const Icon(Icons.delete, color: Colors.white, size: 30),
           ),
-          child: Theme(
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 24),
+            decoration: BoxDecoration(
+              color: Colors.white.withAlpha(50),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withAlpha(80)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
               initiallyExpanded: false,
@@ -592,32 +625,6 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
                         builder: (context) =>
                             MedicalRecordDialog(patient: p, record: record),
                       );
-                    },
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    onPressed: () async {
-                      final clinic = ref.read(clinicStreamProvider).value;
-                      if (clinic == null) return;
-
-                      final canWrite = await ref
-                          .read(permissionServiceProvider)
-                          .canWrite(clinic.id);
-                      if (!canWrite) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                ref.tr('delete_restricted_subscription'),
-                              ),
-                            ),
-                          );
-                        }
-                        return;
-                      }
-
-                      if (!context.mounted) return;
-                      _showDeleteRecordDialog(context, p, record);
                     },
                   ),
                 ],
@@ -903,6 +910,7 @@ class _PatientProfileScreenState extends ConsumerState<PatientProfileScreen> {
               ],
             ),
           ),
+        ),
         );
       },
     );

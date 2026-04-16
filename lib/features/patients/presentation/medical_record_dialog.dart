@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
+import 'package:flutter/foundation.dart';
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../../core/services/cleanup_service.dart';
@@ -50,7 +51,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
   late final TextEditingController _paidController;
   late final TextEditingController _remainingController;
 
-  final List<File> _visitImages = [];
+  final List<XFile> _visitImages = [];
   late List<String> _existingUrls;
   final List<String> _urlsToDelete = [];
   final ImagePicker _picker = ImagePicker();
@@ -137,7 +138,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
       );
       if (pickedFiles.isNotEmpty) {
         setState(() {
-          _visitImages.addAll(pickedFiles.map((p) => File(p.path)));
+          _visitImages.addAll(pickedFiles);
         });
       }
     } else {
@@ -149,7 +150,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
       );
       if (pickedFile != null) {
         setState(() {
-          _visitImages.add(File(pickedFile.path));
+          _visitImages.add(pickedFile);
         });
       }
     }
@@ -395,18 +396,18 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
         iconTheme: const IconThemeData(color: Colors.white),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: Colors.white.withAlpha(30),
+          fillColor: Colors.white.withAlpha(50),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide(color: Colors.white.withAlpha(60)),
+            borderSide: BorderSide(color: Colors.white.withAlpha(80), width: 1.5),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide(color: Colors.white.withAlpha(60)),
+            borderSide: BorderSide(color: Colors.white.withAlpha(100), width: 1.5),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Colors.white, width: 2),
+            borderSide: const BorderSide(color: Colors.tealAccent, width: 2.5),
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 20,
@@ -729,14 +730,21 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
               // New images
               ..._visitImages.asMap().entries.map((entry) {
                 final index = entry.key;
-                final file = entry.value;
+                final xFile = entry.value;
                 return _buildImageItem(
-                  child: Image.file(
-                    file,
-                    fit: BoxFit.cover,
-                    width: 120,
-                    height: 120,
-                  ),
+                  child: kIsWeb
+                      ? Image.network(
+                          xFile.path,
+                          fit: BoxFit.cover,
+                          width: 120,
+                          height: 120,
+                        )
+                      : Image.file(
+                          File(xFile.path),
+                          fit: BoxFit.cover,
+                          width: 120,
+                          height: 120,
+                        ),
                   onRemove: () => setState(() => _visitImages.removeAt(index)),
                 );
               }),
@@ -840,13 +848,16 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
               final picked = await showDatePicker(
                 context: context,
                 initialDate: _nextReExamDate ??
-                    DateTime.now().add(const Duration(days: 7)),
+                    widget.record.date.add(const Duration(days: 7)),
                 firstDate: DateTime.now(),
                 lastDate: DateTime.now().add(const Duration(days: 365)),
                 locale: Locale(ref.read(languageProvider).languageCode),
               );
               if (picked != null) {
-                setState(() => _nextReExamDate = picked);
+                // Store at noon to prevent UTC timezone shift placing it on the wrong day
+                setState(() => _nextReExamDate = DateTime(
+                  picked.year, picked.month, picked.day, 12,
+                ));
               }
             },
             child: Text(
@@ -919,6 +930,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
             fieldViewBuilder:
                 (context, controller, focusNode, onEditingComplete) {
                   return _buildTextField(
+                    label: ref.tr('medication_name'),
                     controller: controller,
                     focusNode: focusNode,
                     icon: Icons.medication_outlined,
@@ -972,6 +984,7 @@ class _MedicalRecordDialogState extends ConsumerState<MedicalRecordDialog> {
           ),
           const SizedBox(height: 12),
           _buildTextField(
+            label: ref.tr('additional_instructions'),
             controller: _medNotesController,
             icon: Icons.info_outline,
           ),

@@ -165,7 +165,6 @@ class AppointmentsListScreen extends ConsumerWidget {
                                   .updateAppointment(
                                     appt.copyWith(
                                       isWaiting: false,
-                                      isCompleted: true,
                                     ),
                                   );
                               ref.read(appointmentsRefreshProvider.notifier).refresh();

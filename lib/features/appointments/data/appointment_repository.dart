@@ -224,8 +224,9 @@ class AppointmentRepository {
     final DateTime? endThreshold;
 
     if (date != null) {
-      startThreshold = DateTime(date.year, date.month, date.day);
-      endThreshold = startThreshold.add(const Duration(days: 1));
+      // Build start/end in UTC from local date components to avoid timezone shift
+      startThreshold = DateTime.utc(date.year, date.month, date.day);
+      endThreshold = DateTime.utc(date.year, date.month, date.day, 23, 59, 59, 999);
     } else {
       startThreshold =
           startAfter ?? DateTime.now().subtract(const Duration(hours: 24));
@@ -234,9 +235,10 @@ class AppointmentRepository {
 
     final docs = all.where((appt) {
       final apptUtc = appt.date.toUtc();
-      final isAfter = apptUtc.isAfter(startThreshold.toUtc());
+      // Use !isBefore (>=) for start so midnight-UTC appointments are included
+      final isAfterOrEqual = !apptUtc.isBefore(startThreshold.toUtc());
       final isBefore = endThreshold == null || apptUtc.isBefore(endThreshold.toUtc());
-      return isAfter && isBefore;
+      return isAfterOrEqual && isBefore;
     }).toList();
 
     docs.sort((a, b) {
@@ -273,11 +275,16 @@ class AppointmentRepository {
     final appointmentWithId = appointment.copyWith(id: docId);
     final data = appointmentWithId.toMap();
 
+    debugPrint('🔵 [TRACE][addAppointment] START — docId=$docId, patientId=${appointment.patientId}, clinicId=${appointment.clinicId}');
+    debugPrint('🔵 [TRACE][addAppointment] isManual=${appointment.isManual}, date=${appointment.date.toUtc().toIso8601String()}');
+
     // 1. Optimistic cache update — IMMEDIATE
     _applyToCache(appointmentWithId, appointment.clinicId, operation: 'create');
+    debugPrint('🔵 [TRACE][addAppointment] ✅ Optimistic cache applied for docId=$docId');
 
     // 2. Network in background
     checkIsOnline().then((isOnline) {
+      debugPrint('🔵 [TRACE][addAppointment] isOnline=$isOnline for docId=$docId');
       if (isOnline) {
         _databases
             .createRow(
@@ -287,9 +294,11 @@ class AppointmentRepository {
               data: data,
             )
             .then((_) {
+              debugPrint('🔵 [TRACE][addAppointment] ✅ SERVER write SUCCESS for docId=$docId, patientId=${appointment.patientId}');
               _refreshAppointmentsInBackground(appointment.clinicId);
             })
-            .catchError((_) {
+            .catchError((e) {
+              debugPrint('🔵 [TRACE][addAppointment] ❌ SERVER write FAILED for docId=$docId: $e');
               _queue.enqueue(
                 table: 'appointments',
                 operation: 'create',
@@ -298,7 +307,7 @@ class AppointmentRepository {
                 clinicId: appointment.clinicId,
               );
               debugPrint(
-                '📥 [AppointmentRepo] addAppointment queued offline: $docId',
+                '📳 [AppointmentRepo] addAppointment queued offline: $docId',
               );
             });
       } else {
@@ -310,7 +319,7 @@ class AppointmentRepository {
           clinicId: appointment.clinicId,
         );
         debugPrint(
-          '📥 [AppointmentRepo] addAppointment queued offline: $docId',
+          '📳 [AppointmentRepo] addAppointment queued offline: $docId',
         );
       }
     });

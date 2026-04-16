@@ -71,7 +71,7 @@ class PatientRemindersScreen extends ConsumerWidget {
                       final appt = appointments[index];
                       final patient = appt.patient;
                       final dateStr = DateFormat(
-                        'yyyy/MM/dd HH:mm',
+                        'yyyy/MM/dd',
                         ref.watch(languageProvider).languageCode,
                       ).format(appt.date);
 
@@ -82,120 +82,138 @@ class PatientRemindersScreen extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(color: Colors.white.withAlpha(40)),
                         ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
                             horizontal: 16,
-                            vertical: 8,
+                            vertical: 12,
                           ),
-                          title: Text(
-                            patient?.name ?? ref.tr('unknown_patient'),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              Text(
-                                ref.tr('appointment_date', [dateStr]),
-                                style: const TextStyle(color: Colors.white70),
-                              ),
-                              if (patient != null) ...[
-                                const SizedBox(height: 4),
-                                Row(
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    GestureDetector(
-                                      onTap: () => _makeCall(patient.phone),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
+                                    Text(
+                                      patient?.name ?? ref.tr('unknown_patient'),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 15,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      ref.tr('appointment_date', [dateStr]),
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    if (patient != null) ...[
+                                      const SizedBox(height: 4),
+                                      Row(
                                         children: [
-                                          const Icon(
-                                            Icons.phone,
-                                            color: Colors.white70,
-                                            size: 14,
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            patient.phone,
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 13,
-                                              decoration:
-                                                  TextDecoration.underline,
+                                          Flexible(
+                                            child: GestureDetector(
+                                              onTap: () => _makeCall(patient.phone),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.phone,
+                                                    color: Colors.white70,
+                                                    size: 14,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Flexible(
+                                                    child: Text(
+                                                      patient.phone,
+                                                      overflow: TextOverflow.ellipsis,
+                                                      style: const TextStyle(
+                                                        color: Colors.white70,
+                                                        fontSize: 13,
+                                                        decoration: TextDecoration.underline,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.copy,
+                                              color: Colors.white38,
+                                              size: 14,
+                                            ),
+                                            constraints: const BoxConstraints(),
+                                            padding: EdgeInsets.zero,
+                                            onPressed: () => _copyToClipboard(
+                                              context,
+                                              ref,
+                                              patient.phone,
+                                            ),
+                                            tooltip: ref.tr('copy_number'),
                                           ),
                                         ],
                                       ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.copy,
-                                        color: Colors.white38,
-                                        size: 14,
-                                      ),
-                                      constraints: const BoxConstraints(),
-                                      padding: EdgeInsets.zero,
-                                      onPressed: () => _copyToClipboard(
-                                        context,
-                                        ref,
-                                        patient.phone,
-                                      ),
-                                      tooltip: ref.tr('copy_number'),
-                                    ),
+                                    ],
                                   ],
-                                ),
-                              ],
-                            ],
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withAlpha(30),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: IconButton(
-                                  icon: const Icon(
-                                    Icons.sms_rounded,
-                                    color: Colors.lightBlueAccent,
-                                    size: 20,
-                                  ),
-                                  onPressed: patient != null
-                                      ? () => _showMessageOptions(
-                                          context,
-                                          ref,
-                                          patient,
-                                          appt.date,
-                                          isWhatsApp: false,
-                                        )
-                                      : null,
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withAlpha(30),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: IconButton(
-                                  icon: const FaIcon(
-                                    FontAwesomeIcons.whatsapp,
-                                    color: Color(0xFF25D366),
-                                    size: 20,
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withAlpha(30),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: IconButton(
+                                      icon: const Icon(
+                                        Icons.sms_rounded,
+                                        color: Colors.lightBlueAccent,
+                                        size: 20,
+                                      ),
+                                      onPressed: patient != null
+                                          ? () => _showMessageOptions(
+                                              context,
+                                              ref,
+                                              patient,
+                                              appt.date,
+                                              isWhatsApp: false,
+                                            )
+                                          : null,
+                                    ),
                                   ),
-                                  onPressed: patient != null
-                                      ? () => _showMessageOptions(
-                                          context,
-                                          ref,
-                                          patient,
-                                          appt.date,
-                                          isWhatsApp: true,
-                                        )
-                                      : null,
-                                ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withAlpha(30),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: IconButton(
+                                      icon: const FaIcon(
+                                        FontAwesomeIcons.whatsapp,
+                                        color: Color(0xFF25D366),
+                                        size: 20,
+                                      ),
+                                      onPressed: patient != null
+                                          ? () => _showMessageOptions(
+                                              context,
+                                              ref,
+                                              patient,
+                                              appt.date,
+                                              isWhatsApp: true,
+                                            )
+                                          : null,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -421,7 +439,7 @@ class PatientRemindersScreen extends ConsumerWidget {
     required bool isWhatsApp,
   }) async {
     final dateStr = DateFormat(
-      'yyyy/MM/dd hh:mm a',
+      'yyyy/MM/dd',
       ref.watch(languageProvider).languageCode,
     ).format(date);
 
@@ -656,7 +674,7 @@ class PatientRemindersScreen extends ConsumerWidget {
               ElevatedButton(
                 onPressed: () async {
                   final dateStr = DateFormat(
-                    'yyyy/MM/dd hh:mm a',
+                    'yyyy/MM/dd',
                     ref.watch(languageProvider).languageCode,
                   ).format(appt.date);
                   final clinic = ref.watch(clinicStreamProvider).value;

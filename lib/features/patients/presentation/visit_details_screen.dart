@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
+import 'package:flutter/foundation.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,7 +44,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
   late final TextEditingController _sugarController;
 
   List<String> _attachmentUrls = [];
-  final List<File> _visitImages = [];
+  final List<XFile> _visitImages = [];
   List<Medication> _medications = [];
   bool _isLoading = false;
   DateTime? _nextReExamDate;
@@ -97,7 +98,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
       );
       if (pickedFiles.isNotEmpty) {
         setState(() {
-          _visitImages.addAll(pickedFiles.map((p) => File(p.path)));
+          _visitImages.addAll(pickedFiles);
         });
       }
     } else {
@@ -109,7 +110,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
       );
       if (pickedFile != null) {
         setState(() {
-          _visitImages.add(File(pickedFile.path));
+          _visitImages.add(pickedFile);
         });
       }
     }
@@ -372,6 +373,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                               onEditingComplete,
                             ) {
                               return _buildDialogField(
+                                label: ref.tr('medication_name'),
                                 controller: controller,
                                 focusNode: focusNode,
                                 icon: Icons.medication_outlined,
@@ -433,6 +435,7 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                       ),
                       const SizedBox(height: 16),
                       _buildDialogField(
+                        label: ref.tr('additional_instructions'),
                         controller: instructionsController,
                         icon: Icons.info_outline,
                         maxLines: 2,
@@ -524,23 +527,23 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
             fontWeight: FontWeight.w500,
           ),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: Colors.white70, size: 20),
+            prefixIcon: Icon(icon, color: Colors.white, size: 20),
             filled: true,
-            fillColor: Colors.white.withAlpha(20),
+            fillColor: Colors.white.withAlpha(40),
             hintText: '',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.white.withAlpha(50), width: 1),
+              borderSide: BorderSide(color: Colors.white.withAlpha(80), width: 1.5),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: Colors.white.withAlpha(50), width: 1),
+              borderSide: BorderSide(color: Colors.white.withAlpha(100), width: 1.5),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: const BorderSide(
-                color: Colors.white,
-                width: 2,
+                color: Colors.tealAccent,
+                width: 2.5,
               ),
             ),
             contentPadding: const EdgeInsets.symmetric(
@@ -1007,13 +1010,16 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
               final picked = await showDatePicker(
                 context: context,
                 initialDate: _nextReExamDate ??
-                    DateTime.now().add(const Duration(days: 7)),
+                    widget.record.date.add(const Duration(days: 7)),
                 firstDate: DateTime.now(),
                 lastDate: DateTime.now().add(const Duration(days: 365)),
                 locale: Locale(ref.read(languageProvider).languageCode),
               );
               if (picked != null) {
-                setState(() => _nextReExamDate = picked);
+                // Store at noon to prevent UTC timezone shift placing it on the wrong day
+                setState(() => _nextReExamDate = DateTime(
+                  picked.year, picked.month, picked.day, 12,
+                ));
               }
             },
             child: Text(
@@ -1217,12 +1223,19 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: Image.file(
-                            file,
-                            width: 90,
-                            height: 90,
-                            fit: BoxFit.cover,
-                          ),
+                          child: kIsWeb
+                              ? Image.network(
+                                  file.path,
+                                  width: 90,
+                                  height: 90,
+                                  fit: BoxFit.cover,
+                                )
+                              : Image.file(
+                                  File(file.path),
+                                  width: 90,
+                                  height: 90,
+                                  fit: BoxFit.cover,
+                                ),
                         ),
                         Positioned(
                           top: 2,
@@ -1262,7 +1275,9 @@ class _VisitDetailsScreenState extends ConsumerState<VisitDetailsScreen> {
         fit: BoxFit.cover,
       );
     } else {
-      return Image.file(File(url), width: 90, height: 90, fit: BoxFit.cover);
+      return kIsWeb
+          ? Image.network(url, width: 90, height: 90, fit: BoxFit.cover)
+          : Image.file(File(url), width: 90, height: 90, fit: BoxFit.cover);
     }
   }
 

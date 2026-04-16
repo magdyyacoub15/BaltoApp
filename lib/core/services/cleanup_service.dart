@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/foundation.dart';
 
@@ -17,6 +17,7 @@ class CleanupService {
 
   /// Deletes a file from the local filesystem given its path.
   Future<void> deleteLocalFile(String? path) async {
+    if (kIsWeb) return; // Local file deletion not supported on Web
     if (path == null || path.isEmpty) return;
     try {
       final file = File(path);

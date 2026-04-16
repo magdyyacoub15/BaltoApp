@@ -67,12 +67,38 @@ class SyncService {
       try {
         switch (entry.operation) {
           case 'create':
-            await _databases.createRow(
-              databaseId: appwriteDatabaseId,
-              tableId: entry.table,
-              rowId: entry.rowId,
-              data: entry.data,
-            );
+            try {
+              await _databases.createRow(
+                databaseId: appwriteDatabaseId,
+                tableId: entry.table,
+                rowId: entry.rowId,
+                data: entry.data,
+                permissions: [
+                  Permission.read(Role.team(entry.clinicId)),
+                  Permission.update(Role.team(entry.clinicId)),
+                  Permission.delete(Role.team(entry.clinicId, 'admin')),
+                ],
+              );
+            } on AppwriteException catch (e) {
+              if (e.message?.contains('user_unauthorized') == true ||
+                  e.code == 401) {
+                // Retry with users() permissions
+                debugPrint('⚠️ [SyncService] team perm denied, retrying with users() for ${entry.table}/${entry.rowId}');
+                await _databases.createRow(
+                  databaseId: appwriteDatabaseId,
+                  tableId: entry.table,
+                  rowId: entry.rowId,
+                  data: entry.data,
+                  permissions: [
+                    Permission.read(Role.users()),
+                    Permission.update(Role.users()),
+                    Permission.delete(Role.users()),
+                  ],
+                );
+              } else {
+                rethrow;
+              }
+            }
             break;
 
           case 'update':
@@ -104,6 +130,16 @@ class SyncService {
           _queue.remove(entry.id);
           debugPrint(
             'ℹ️ [SyncService] ${entry.operation} ${entry.table}/${entry.rowId} — skipped (${e.code})',
+          );
+        } else if (e is AppwriteException &&
+            e.code == 400 &&
+            (e.message?.contains('row_invalid_structure') == true ||
+                e.message?.contains('Invalid document structure') == true)) {
+          // Permanently invalid payload (e.g. stale field from old app version).
+          // Remove from queue to prevent infinite retry loops.
+          _queue.remove(entry.id);
+          debugPrint(
+            '🗑️ [SyncService] ${entry.operation} ${entry.table}/${entry.rowId} — dropped (invalid structure: ${e.message})',
           );
         } else {
           debugPrint(

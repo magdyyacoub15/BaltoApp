@@ -1,21 +1,26 @@
-import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter/foundation.dart';
 
 final imgbbServiceProvider = Provider((ref) => ImgBBService());
 
 class ImgBBService {
   final String _apiKey = '5b4d7c307a17ca146e1c6d831148e1d4';
 
-  Future<ImgBBUploadResult?> uploadImage(File imageFile) async {
+  Future<ImgBBUploadResult?> uploadImage(XFile imageFile) async {
     try {
+      final bytes = await imageFile.readAsBytes();
       final uri = Uri.parse('https://api.imgbb.com/1/upload');
       final request = http.MultipartRequest('POST', uri);
       request.fields['key'] = _apiKey;
       request.files.add(
-        await http.MultipartFile.fromPath('image', imageFile.path),
+        http.MultipartFile.fromBytes(
+          'image',
+          bytes,
+          filename: imageFile.name,
+        ),
       );
 
       final response = await request.send();

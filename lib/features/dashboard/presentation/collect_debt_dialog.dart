@@ -1,3 +1,4 @@
+// ignore_for_file: use_build_context_synchronously
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../patients/domain/patient.dart';
@@ -64,12 +65,16 @@ class _CollectDebtDialogState extends ConsumerState<CollectDebtDialog> {
       final user = ref.read(currentUserProvider).value;
       if (user == null) return;
 
+      debugPrint('🟢 [TRACE][collectDebt] START — amount=$amount, patient=${_selectedPatient!.name} (${_selectedPatient!.id}), clinicId=${user.clinicId}');
+      debugPrint('🟢 [TRACE][collectDebt] recordId=${_selectedRecord!.id}, recordRemaining=${_selectedRecord!.remainingAmount}');
+
       // 1. Deduct from patient debt
       await ref.read(patientRepositoryProvider).payMedicalRecordDebt(
             patient: _selectedPatient!,
             recordId: _selectedRecord!.id,
             amountPaid: amount,
           );
+      debugPrint('🟢 [TRACE][collectDebt] ✅ Step 1: payMedicalRecordDebt done');
 
       // 2. Add revenue transaction for today's accounts
       final transaction = AppTransaction(
@@ -80,11 +85,14 @@ class _CollectDebtDialogState extends ConsumerState<CollectDebtDialog> {
         date: DateTime.now(),
         clinicId: user.clinicId,
       );
-      await ref.read(transactionRepositoryProvider).addTransaction(transaction);
+      final txId = await ref.read(transactionRepositoryProvider).addTransaction(transaction);
+      debugPrint('🟢 [TRACE][collectDebt] ✅ Step 2: addTransaction returned txId=$txId, clinicId=${user.clinicId}');
 
       // 3. Refresh providers
       ref.read(transactionsRefreshProvider.notifier).refresh();
+      debugPrint('🟢 [TRACE][collectDebt] ✅ Step 3: transactionsRefresh triggered');
       ref.read(patientsRefreshProvider.notifier).refresh();
+      debugPrint('🟢 [TRACE][collectDebt] ✅ Step 3: patientsRefresh triggered');
 
       if (mounted) {
         Navigator.pop(context);
@@ -98,6 +106,7 @@ class _CollectDebtDialogState extends ConsumerState<CollectDebtDialog> {
         );
       }
     } catch (e) {
+      debugPrint('🔴 [TRACE][collectDebt] ❌ ERROR: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${ref.tr('error')}: $e')),

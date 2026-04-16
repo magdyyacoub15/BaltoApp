@@ -229,30 +229,7 @@ class TransactionRepository {
     // 2. Network sync in background (fire-and-forget)
     checkIsOnline().then((isOnline) {
       if (isOnline) {
-        _databases
-            .createRow(
-          databaseId: appwriteDatabaseId,
-          tableId: 'transactions',
-          rowId: docId,
-          data: data,
-          permissions: [
-            Permission.read(Role.team(transaction.clinicId)),
-            Permission.update(Role.team(transaction.clinicId)),
-            Permission.delete(Role.team(transaction.clinicId, 'admin')),
-          ],
-        )
-            .then((_) {
-          _refreshInBackground(transaction.clinicId);
-        }).catchError((_) {
-          _queue.enqueue(
-            table: 'transactions',
-            operation: 'create',
-            rowId: docId,
-            data: data,
-            clinicId: transaction.clinicId,
-          );
-          debugPrint('📥 [TransactionRepo] addTransaction queued offline: $docId');
-        });
+        _tryCreateTransactionWithPermissions(docId, data, transaction.clinicId, useTeam: true);
       } else {
         _queue.enqueue(
           table: 'transactions',
@@ -267,6 +244,46 @@ class TransactionRepository {
 
     return docId; // returns INSTANTLY
   }
+
+  void _tryCreateTransactionWithPermissions(String docId, Map<String, dynamic> data, String clinicId, {required bool useTeam}) {
+    final permissions = useTeam
+        ? [
+            Permission.read(Role.team(clinicId)),
+            Permission.update(Role.team(clinicId)),
+            Permission.delete(Role.team(clinicId, 'admin')),
+          ]
+        : [
+            Permission.read(Role.users()),
+            Permission.update(Role.users()),
+            Permission.delete(Role.users()),
+          ];
+
+    _databases.createRow(
+      databaseId: appwriteDatabaseId,
+      tableId: 'transactions',
+      rowId: docId,
+      data: data,
+      permissions: permissions,
+    ).then((_) {
+      _refreshInBackground(clinicId);
+    }).catchError((e) {
+      final errStr = e.toString();
+      if (useTeam && errStr.contains('user_unauthorized')) {
+        debugPrint('⚠️ [TransactionRepo] team perm denied, retrying with users() for docId=$docId');
+        _tryCreateTransactionWithPermissions(docId, data, clinicId, useTeam: false);
+      } else {
+        _queue.enqueue(
+          table: 'transactions',
+          operation: 'create',
+          rowId: docId,
+          data: data,
+          clinicId: clinicId,
+        );
+        debugPrint('📥 [TransactionRepo] addTransaction queued offline: $docId');
+      }
+    });
+  }
+
 
   Future<void> updateTransaction(String id, AppTransaction transaction) async {
     final data = transaction.toMap();

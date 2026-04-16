@@ -73,7 +73,6 @@ class DashboardScreen extends ConsumerWidget {
                     ref,
                     quickAppointmentsAsync,
                     ref.watch(removedAppointmentIdsProvider),
-                    ref.watch(inExaminationIdsProvider),
                   ),
                   const SizedBox(height: 80), // Padding for FAB
                 ]),
@@ -285,7 +284,6 @@ class DashboardScreen extends ConsumerWidget {
     WidgetRef ref,
     AsyncValue<List<Appointment>> appointmentsAsync,
     Set<String> removedIds,
-    Set<String> inExaminationIds,
   ) {
     return appointmentsAsync.when(
       skipLoadingOnRefresh: true,
@@ -317,7 +315,9 @@ class DashboardScreen extends ConsumerWidget {
           );
         }
 
-        final appointmentsFiltered = appointments.where((a) => !removedIds.contains(a.id)).toList();
+        final appointmentsFiltered = appointments
+            .where((a) => !removedIds.contains(a.id))
+            .toList();
 
         if (appointmentsFiltered.isEmpty) {
           return Center(
@@ -325,12 +325,12 @@ class DashboardScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(vertical: 40),
               child: Column(
                 children: [
-                   Icon(Icons.event_busy, color: Colors.white24, size: 48),
-                   SizedBox(height: 12),
-                   Text(
-                     ref.tr('no_appointments_today'),
-                     style: TextStyle(color: Colors.white38),
-                   ),
+                  Icon(Icons.event_busy, color: Colors.white24, size: 48),
+                  SizedBox(height: 12),
+                  Text(
+                    ref.tr('no_appointments_today'),
+                    style: TextStyle(color: Colors.white38),
+                  ),
                 ],
               ),
             ),
@@ -352,19 +352,21 @@ class DashboardScreen extends ConsumerWidget {
             // Update queueOrder for the reordered list
             final updatedAppointments = <Appointment>[];
             for (int i = 0; i < listForReorder.length; i++) {
-              updatedAppointments.add(listForReorder[i].copyWith(queueOrder: i));
+              updatedAppointments.add(
+                listForReorder[i].copyWith(queueOrder: i),
+              );
             }
 
-                // Save new order to Firestore
-                await ref
-                    .read(appointmentRepositoryProvider)
-                    .updateQueueOrder(updatedAppointments);
-                
-                // Force immediate UI refresh to sync with updated cache
-                ref.read(appointmentsRefreshProvider.notifier).refresh();
-              },
-              itemBuilder: (context, index) {
-                final appt = appointmentsFiltered[index];
+            // Save new order to Firestore
+            await ref
+                .read(appointmentRepositoryProvider)
+                .updateQueueOrder(updatedAppointments);
+
+            // Force immediate UI refresh to sync with updated cache
+            ref.read(appointmentsRefreshProvider.notifier).refresh();
+          },
+          itemBuilder: (context, index) {
+            final appt = appointmentsFiltered[index];
             final item = Container(
               key: ValueKey(appt.id),
               margin: const EdgeInsets.only(bottom: 12),
@@ -389,8 +391,10 @@ class DashboardScreen extends ConsumerWidget {
                     ? () {
                         showDialog(
                           context: context,
-                          builder: (context) =>
-                              AddPatientScreen(patient: appt.patient, editOnly: true),
+                          builder: (context) => AddPatientScreen(
+                            patient: appt.patient,
+                            editOnly: true,
+                          ),
                         );
                       }
                     : null,
@@ -500,8 +504,8 @@ class DashboardScreen extends ConsumerWidget {
                         color: Colors.green,
                         size: 24,
                       )
-                    else if (!inExaminationIds.contains(appt.id))
-                      // Stage 1: Waiting → Enter Doctor Room (local only)
+                    else if (appt.isWaiting)
+                      // Stage 1: Waiting → Enter Doctor Room
                       SizedBox(
                         height: 32,
                         child: ElevatedButton(
@@ -529,7 +533,8 @@ class DashboardScreen extends ConsumerWidget {
                       SizedBox(
                         height: 32,
                         child: ElevatedButton(
-                          onPressed: () => _completeAppointment(context, ref, appt),
+                          onPressed: () =>
+                              _completeAppointment(context, ref, appt),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.orange,
                             foregroundColor: Colors.white,
@@ -593,20 +598,23 @@ class DashboardScreen extends ConsumerWidget {
                             appt.patient?.name ?? ref.tr('unknown_patient');
 
                         // --- IMMEDIATE LOCAL REMOVAL (Fixes Dismissible Error) ---
-                        ref.read(removedAppointmentIdsProvider.notifier).add(apptId);
-                        
+                        ref
+                            .read(removedAppointmentIdsProvider.notifier)
+                            .add(apptId);
+
                         try {
                           // --- Financial & Record Cleanup Logic ---
                           if (appt.patient != null) {
                             final patient = appt.patient!;
                             final apptDate = appt.date;
-                            
+
                             // 1. Match by: same day AND not finalized (more reliable than minute match)
-                            int recordIndex = patient.records.indexWhere((r) =>
-                              r.date.year == apptDate.year &&
-                              r.date.month == apptDate.month &&
-                              r.date.day == apptDate.day &&
-                              !r.isFinalized
+                            int recordIndex = patient.records.indexWhere(
+                              (r) =>
+                                  r.date.year == apptDate.year &&
+                                  r.date.month == apptDate.month &&
+                                  r.date.day == apptDate.day &&
+                                  !r.isFinalized,
                             );
 
                             // Fallback: match by minute if same-day search fails
@@ -616,38 +624,54 @@ class DashboardScreen extends ConsumerWidget {
                                 return diff.inMinutes < 5;
                               });
                             }
-                            
+
                             if (recordIndex != -1) {
                               final record = patient.records[recordIndex];
-                              
+
                               // 2. Transaction Deletion
-                              if (record.transactionId != null && record.transactionId!.isNotEmpty) {
-                                await ref.read(transactionRepositoryProvider).deleteTransaction(
-                                  record.transactionId!,
-                                  apptClinicId,
-                                );
-                                ref.read(transactionsRefreshProvider.notifier).refresh();
+                              if (record.transactionId != null &&
+                                  record.transactionId!.isNotEmpty) {
+                                await ref
+                                    .read(transactionRepositoryProvider)
+                                    .deleteTransaction(
+                                      record.transactionId!,
+                                      apptClinicId,
+                                    );
+                                ref
+                                    .read(transactionsRefreshProvider.notifier)
+                                    .refresh();
                               }
-                              
+
                               // 3. Financial Adjustment (Reverse the amounts from patient totals)
-                              final updatedPaid = (patient.paidAmount - record.paidAmount).clamp(0.0, double.infinity);
-                              final updatedRemaining = (patient.remainingAmount - record.remainingAmount).clamp(0.0, double.infinity);
-                              
+                              final updatedPaid =
+                                  (patient.paidAmount - record.paidAmount)
+                                      .clamp(0.0, double.infinity);
+                              final updatedRemaining =
+                                  (patient.remainingAmount -
+                                          record.remainingAmount)
+                                      .clamp(0.0, double.infinity);
+
                               // 4. Update Patient (remove record + adjust totals)
-                              final updatedRecords = List<MedicalRecord>.from(patient.records);
-                              updatedRecords.removeAt(recordIndex);
-                              
-                              await ref.read(patientRepositoryProvider).updatePatient(
-                                patient.copyWith(
-                                  records: updatedRecords,
-                                  paidAmount: updatedPaid,
-                                  remainingAmount: updatedRemaining,
-                                ),
+                              final updatedRecords = List<MedicalRecord>.from(
+                                patient.records,
                               );
+                              updatedRecords.removeAt(recordIndex);
+
+                              await ref
+                                  .read(patientRepositoryProvider)
+                                  .updatePatient(
+                                    patient.copyWith(
+                                      records: updatedRecords,
+                                      paidAmount: updatedPaid,
+                                      remainingAmount: updatedRemaining,
+                                    ),
+                                  );
                             } else {
                               // No medical record found but still need to check for orphan transactions
                               // Try to find a transaction for today to delete it
-                              debugPrint('⚠️ [Dashboard] No matching medical record found for appointment ${appt.id}');
+                              debugPrint(
+                                '⚠️ [Dashboard] No matching medical record found for appointment ${appt.id}',
+                              );
                             }
                           }
 
@@ -658,8 +682,12 @@ class DashboardScreen extends ConsumerWidget {
 
                           if (context.mounted) {
                             // Refresh financial state providers
-                            ref.read(transactionsRefreshProvider.notifier).refresh();
-                            ref.read(patientsRefreshProvider.notifier).refresh();
+                            ref
+                                .read(transactionsRefreshProvider.notifier)
+                                .refresh();
+                            ref
+                                .read(patientsRefreshProvider.notifier)
+                                .refresh();
 
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
@@ -672,12 +700,16 @@ class DashboardScreen extends ConsumerWidget {
                             );
                           }
                         } catch (e) {
-                          debugPrint('❌ [Dashboard] Error during dismissal cleanup: $e');
+                          debugPrint(
+                            '❌ [Dashboard] Error during dismissal cleanup: $e',
+                          );
                           // Even if cleanup fails, ensure the appointment is attempted to be deleted
                           try {
-                            await ref.read(appointmentRepositoryProvider).deleteAppointment(apptId, apptClinicId);
+                            await ref
+                                .read(appointmentRepositoryProvider)
+                                .deleteAppointment(apptId, apptClinicId);
                           } catch (_) {}
-                          
+
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
@@ -716,10 +748,14 @@ class DashboardScreen extends ConsumerWidget {
     return Colors.white70;
   }
 
-  // دخول: local-only state change — NO database write, NO cache change,
-  // so queue order is NEVER affected.
-  void _enterExamination(WidgetRef ref, Appointment appt) {
-    ref.read(inExaminationIdsProvider.notifier).enter(appt.id);
+  void _enterExamination(WidgetRef ref, Appointment appt) async {
+    // 1. Persist the change to DB/Cache so other devices see it
+    await ref
+        .read(appointmentRepositoryProvider)
+        .updateAppointment(appt.copyWith(isWaiting: false));
+
+    // 2. Trigger UI refresh
+    ref.read(appointmentsRefreshProvider.notifier).refresh();
   }
 
   Future<void> _completeAppointment(
@@ -729,9 +765,6 @@ class DashboardScreen extends ConsumerWidget {
   ) async {
     final user = ref.read(currentUserProvider).value;
     if (user == null) return;
-
-    // Remove from local "in examination" set
-    ref.read(inExaminationIdsProvider.notifier).finish(appt.id);
 
     // Mark as completed (moves to bottom of list)
     await ref
@@ -796,6 +829,9 @@ class DashboardScreen extends ConsumerWidget {
             onPressed: () async {
               final user = ref.read(currentUserProvider).value;
               if (user == null || amountController.text.isEmpty) return;
+              debugPrint(
+                '🔴 [TRACE][addExpense] START — amount=${amountController.text}, clinicId=${user.clinicId}',
+              );
               final expense = AppTransaction(
                 id: '',
                 amount: double.parse(amountController.text),
@@ -804,11 +840,17 @@ class DashboardScreen extends ConsumerWidget {
                 date: DateTime.now(),
                 clinicId: user.clinicId,
               );
-              await ref
+              final txId = await ref
                   .read(transactionRepositoryProvider)
                   .addTransaction(expense);
+              debugPrint(
+                '🔴 [TRACE][addExpense] addTransaction returned txId=$txId',
+              );
               // Force immediate UI refresh
               ref.read(transactionsRefreshProvider.notifier).refresh();
+              debugPrint(
+                '🔴 [TRACE][addExpense] transactionsRefresh triggered after expense',
+              );
               if (context.mounted) Navigator.pop(context);
             },
             child: Text(ref.tr('save')),

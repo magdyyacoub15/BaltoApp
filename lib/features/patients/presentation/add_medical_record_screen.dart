@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
@@ -58,7 +59,7 @@ class _AddMedicalRecordScreenState
   final _medNameFocusNode = FocusNode();
   final _medNotesController = TextEditingController();
 
-  final List<File> _visitImages = [];
+  final List<XFile> _visitImages = [];
   final List<String> _existingUrls = [];
   final ImagePicker _picker = ImagePicker();
   bool _isLoading = false;
@@ -143,7 +144,7 @@ class _AddMedicalRecordScreenState
       );
       if (pickedFiles.isNotEmpty) {
         setState(() {
-          _visitImages.addAll(pickedFiles.map((f) => File(f.path)));
+          _visitImages.addAll(pickedFiles);
         });
       }
     } else {
@@ -155,7 +156,7 @@ class _AddMedicalRecordScreenState
       );
       if (pickedFile != null) {
         setState(() {
-          _visitImages.add(File(pickedFile.path));
+          _visitImages.add(pickedFile);
         });
       }
     }
@@ -952,14 +953,21 @@ class _AddMedicalRecordScreenState
               // Newly selected images
               ..._visitImages.asMap().entries.map((entry) {
                 final index = entry.key;
-                final file = entry.value;
+                final xFile = entry.value;
                 return _buildImageItem(
-                  child: Image.file(
-                    file,
-                    fit: BoxFit.cover,
-                    width: 120,
-                    height: 120,
-                  ),
+                  child: kIsWeb
+                      ? Image.network(
+                          xFile.path,
+                          fit: BoxFit.cover,
+                          width: 120,
+                          height: 120,
+                        )
+                      : Image.file(
+                          File(xFile.path),
+                          fit: BoxFit.cover,
+                          width: 120,
+                          height: 120,
+                        ),
                   onRemove: () => setState(() => _visitImages.removeAt(index)),
                 );
               }),

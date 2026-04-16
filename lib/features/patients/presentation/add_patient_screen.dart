@@ -253,6 +253,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
             isManual: true,
           ),
         );
+        debugPrint('✅ [TRACE][save] addAppointment done for NEW patient: patientId=$patientId, clinicId=${user.clinicId}');
       } else {
         // --- EXISTING PATIENT ---
         final targetPatient = widget.patient ?? _matchedPatient!;
@@ -347,6 +348,7 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
                 isManual: true,
               ),
             );
+            debugPrint('✅ [TRACE][save] addAppointment done for EXISTING patient: patientId=$patientId, clinicId=${user.clinicId}');
 
             // Create Medical Record
             String? parentId;
@@ -419,15 +421,18 @@ class _AddPatientScreenState extends ConsumerState<AddPatientScreen> {
       }
 
       // --- REFRESH ---
+      debugPrint('🔄 [TRACE][save] Triggering all refreshes: patients, appointments, transactions');
       ref.read(patientsRefreshProvider.notifier).refresh();
       ref.read(appointmentsRefreshProvider.notifier).refresh();
       ref.read(transactionsRefreshProvider.notifier).refresh();
+      debugPrint('🔄 [TRACE][save] All refreshes triggered successfully');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ref.tr('save_success'))));
         Navigator.pop(context);
       }
     } catch (e) {
+      debugPrint('❌ [TRACE][save] ERROR: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${ref.tr('save_error')}: $e')));
       }
